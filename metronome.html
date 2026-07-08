@@ -11,9 +11,13 @@
 <title>SetClick — Setlist Metronome</title>
 <style>
 :root{
-  --bg:#101215; --panel:#1a1d22; --panel-2:#22262d; --line:#2e333b;
-  --text:#e8eaed; --dim:#8b929d; --faint:#565d68;
-  --amber:#ffae42; --amber-dim:#7a5a28; --red:#ff4f3f; --green:#3dd68c;
+  --bg:#0f0f13; 
+  --panel:rgba(35, 35, 45, 0.65); 
+  --panel-2:rgba(55, 55, 65, 0.55); 
+  --line:rgba(255, 255, 255, 0.12);
+  --text:#f8f9fa; --dim:#a0a5ad; --faint:#6b7280;
+  --amber:#ffb84d; --amber-dim:rgba(255, 184, 77, 0.25); 
+  --red:#ff5c5c; --green:#4ade80;
   --radius:18px;
   --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
 }
@@ -36,15 +40,17 @@ button{border:0; background:none; padding:0; cursor:pointer;}
   flex:1; display:flex; align-items:center; gap:8px; min-width:0;
   background:var(--panel); border:1px solid var(--line); border-radius:999px;
   padding:10px 14px; font-size:14px; font-weight:600;
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
 }
-.set-pill .dot{width:8px; height:8px; border-radius:50%; background:var(--faint); flex:0 0 auto;}
-.set-pill.connected .dot{background:var(--green);}
+.set-pill .dot{width:8px; height:8px; border-radius:50%; background:var(--faint); flex:0 0 auto; box-shadow: 0 0 8px rgba(107, 114, 128, 0.4);}
+.set-pill.connected .dot{background:var(--green); box-shadow: 0 0 12px rgba(74, 222, 128, 0.6);}
 .set-pill span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--dim);}
 .set-pill.connected span{color:var(--text);}
 .iconbtn{
   width:42px; height:42px; border-radius:50%; background:var(--panel);
   border:1px solid var(--line); display:flex; align-items:center; justify-content:center;
   font-size:18px; color:var(--dim); flex:0 0 auto;
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
 }
 .iconbtn:active{background:var(--panel-2);}
 
@@ -60,15 +66,16 @@ button{border:0; background:none; padding:0; cursor:pointer;}
 .carousel::-webkit-scrollbar{display:none;}
 .card{
   flex:0 0 min(66vw, 300px); scroll-snap-align:center;
-  background:var(--panel); border:1.5px solid var(--line); border-radius:20px;
+  background:var(--panel); border:1px solid var(--line); border-radius:20px;
   padding:13px 16px 12px; text-align:left; opacity:.5;
   transition:border-color .22s, box-shadow .22s, opacity .22s, transform .22s;
   transform:scale(.965);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
 }
 .card.active{
   opacity:1; transform:scale(1);
-  border-color:var(--amber-dim);
-  box-shadow:0 0 0 1px var(--amber-dim), 0 10px 30px rgba(0,0,0,.4);
+  border-color:var(--amber);
+  box-shadow:0 0 0 1px var(--amber), 0 12px 40px rgba(0,0,0,.5), 0 0 20px var(--amber-dim);
 }
 .chead{display:flex; align-items:center; gap:8px; margin-bottom:8px;}
 .cnum{
@@ -108,13 +115,14 @@ button{border:0; background:none; padding:0; cursor:pointer;}
 .lamps{display:flex; gap:12px; margin-top:18px; flex-wrap:wrap; justify-content:center; max-width:320px;}
 .lamp{
   width:26px; height:26px; border-radius:50%;
-  background:var(--panel-2); border:2px solid var(--line);
-  transition:transform .08s;
+  background:var(--panel-2); border:1px solid var(--line);
+  transition:transform .08s, box-shadow .08s, background .08s;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
 }
-.lamp.accent{border-color:var(--amber-dim);}
-.lamp.mute{background:transparent; border-style:dashed; opacity:.5;}
-.lamp.on{background:var(--amber); border-color:var(--amber); box-shadow:0 0 18px rgba(255,174,66,.55); transform:scale(1.15);}
-.lamp.on.down{background:var(--red); border-color:var(--red); box-shadow:0 0 22px rgba(255,79,63,.6);}
+.lamp.accent{border:1.5px solid var(--amber);}
+.lamp.mute{background:transparent; border:1px dashed var(--faint); opacity:.5;}
+.lamp.on{background:var(--amber); border-color:var(--amber); box-shadow:0 0 24px rgba(255,184,77,.7); transform:scale(1.15);}
+.lamp.on.down{background:var(--red); border-color:var(--red); box-shadow:0 0 28px rgba(255,92,92,.8);}
 .lamps-hint{font-size:11px; color:var(--faint); margin-top:10px;}
 
 /* ---------- controls ---------- */
@@ -124,8 +132,10 @@ button{border:0; background:none; padding:0; cursor:pointer;}
   width:56px; height:56px; border-radius:50%; background:var(--panel);
   border:1px solid var(--line); font-size:26px; font-weight:700; color:var(--text);
   flex:0 0 auto; display:flex; align-items:center; justify-content:center;
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  transition: background .15s, border-color .15s;
 }
-.step:active{background:var(--panel-2); border-color:var(--amber-dim);}
+.step:active{background:var(--panel-2); border-color:var(--amber);}
 input[type=range]{
   flex:1; -webkit-appearance:none; appearance:none; height:6px; border-radius:3px;
   background:linear-gradient(to right, var(--amber) 0%, var(--amber) var(--fill,50%), var(--line) var(--fill,50%));
@@ -133,57 +143,90 @@ input[type=range]{
 }
 input[type=range]::-webkit-slider-thumb{
   -webkit-appearance:none; width:30px; height:30px; border-radius:50%;
-  background:var(--text); border:none; box-shadow:0 2px 8px rgba(0,0,0,.5);
+  background:var(--text); border:none; box-shadow:0 2px 12px rgba(0,0,0,.6);
 }
 .btnrow{display:flex; gap:10px;}
 .chip{
   flex:1; height:54px; border-radius:14px; background:var(--panel); border:1px solid var(--line);
   font-size:15px; font-weight:700; color:var(--text);
   display:flex; align-items:center; justify-content:center; gap:6px;
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  transition: background .15s, color .15s, border-color .15s;
 }
 .chip:active{background:var(--panel-2);}
-.chip.tap:active{border-color:var(--amber); color:var(--amber);}
+.chip.tap:active{border-color:var(--amber); color:var(--amber); box-shadow: 0 0 16px var(--amber-dim);}
 .chip.count{flex-direction:column; gap:2px; line-height:1; font-size:13px;}
 .chip.count .eyebrow{font-size:9px; letter-spacing:.14em; color:var(--faint); font-weight:800;}
 .chip.count.off #cntVal{color:var(--dim);}
 .chip.count:not(.off) #cntVal{color:var(--amber);}
-select.chip{appearance:none; -webkit-appearance:none; text-align:center; text-align-last:center; padding:0 8px;}
+select.chip{appearance:none; -webkit-appearance:none; text-align:center; text-align-last:center; padding:0 8px; color: var(--text);}
+select.chip option { background: var(--bg); color: var(--text); }
 
 .transportrow{display:flex; gap:10px;}
 .transport{
   flex:1; height:76px; border-radius:22px; font-size:20px; font-weight:800; letter-spacing:.14em;
-  background:var(--amber); color:#181206;
+  background:linear-gradient(135deg, var(--amber), #ff981a); color:#181206;
   display:flex; align-items:center; justify-content:center; gap:10px;
-  box-shadow:0 6px 24px rgba(255,174,66,.25);
+  box-shadow:0 6px 24px rgba(255,184,77,.3); border:1px solid rgba(255,255,255,0.2);
+  transition: transform .15s, box-shadow .15s, background .15s, color .15s, border .15s;
 }
-.transport:active{transform:scale(.985);}
-.transport.playing{background:var(--panel); color:var(--red); border:2px solid var(--red); box-shadow:none;}
+.transport:active{transform:scale(.97);}
+.transport.playing{background:var(--panel); color:var(--red); border:1px solid var(--red); box-shadow: 0 0 20px rgba(255,92,92,.2); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);}
 .nextbtn{
   flex:0 0 122px; border-radius:22px; background:var(--panel); border:1px solid var(--line);
   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  transition: background .15s, border-color .15s;
 }
-.nextbtn:active{background:var(--panel-2); border-color:var(--amber-dim);}
-.nextbtn[disabled]{opacity:.4;}
+.nextbtn:active{background:var(--panel-2); border-color:var(--amber);}
+.nextbtn[disabled]{opacity:.4; pointer-events:none;}
 .neyebrow{font-size:10px; font-weight:800; letter-spacing:.16em; color:var(--amber);}
 #nextTitle{
   font-size:12px; font-weight:700; color:var(--dim); max-width:104px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 
-/* ---------- sheets ---------- */
-.backdrop{
-  position:fixed; inset:0; background:rgba(0,0,0,.55); opacity:0; pointer-events:none;
-  transition:opacity .2s; z-index:40;
-}
-.backdrop.show{opacity:1; pointer-events:auto;}
+/* ---------- sheets (dialogs) ---------- */
 .sheet{
-  position:fixed; left:0; right:0; bottom:0; z-index:50;
-  background:var(--panel); border-radius:24px 24px 0 0; border-top:1px solid var(--line);
+  margin: auto auto 0 auto; /* Anchor bottom, center horizontally */
+  width: 100%; max-width: 600px;
+  background:var(--panel); border-radius:24px 24px 0 0; border:1px solid var(--line); border-bottom: none;
   max-height:86dvh; display:flex; flex-direction:column;
-  transform:translateY(105%); transition:transform .26s cubic-bezier(.32,.72,.32,1);
-  padding-bottom:calc(var(--sab) + 8px);
+  padding:0; padding-bottom:calc(var(--sab) + 8px);
+  color: var(--text);
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  
+  /* Top layer animations */
+  transform:translateY(100%); opacity:0;
+  transition-property: transform, opacity, display, overlay;
+  transition-duration: 0.35s;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1); /* Snappy out-cubic */
+  transition-behavior: allow-discrete;
 }
-.sheet.show{transform:translateY(0);}
+.sheet[open]{
+  transform:translateY(0); opacity:1;
+  @starting-style {
+    transform:translateY(100%); opacity:0;
+  }
+}
+.sheet::backdrop{
+  background-color: rgba(0,0,0,0);
+  backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px);
+  transition:
+    display 0.35s allow-discrete,
+    overlay 0.35s allow-discrete,
+    background-color 0.35s ease-out,
+    backdrop-filter 0.35s ease-out,
+    -webkit-backdrop-filter 0.35s ease-out;
+}
+.sheet[open]::backdrop{
+  background-color: rgba(0,0,0,0.6);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  @starting-style {
+    background-color: rgba(0,0,0,0);
+    backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px);
+  }
+}
 .sheet header{
   display:flex; align-items:center; gap:8px; padding:16px 18px 10px; flex:0 0 auto;
 }
@@ -196,13 +239,15 @@ select.chip{appearance:none; -webkit-appearance:none; text-align:center; text-al
 .rowbtn{
   width:100%; text-align:left; background:var(--panel-2); border:1px solid var(--line);
   border-radius:14px; padding:14px 16px; margin-bottom:10px;
-  display:flex; align-items:center; gap:12px;
+  display:flex; align-items:center; gap:12px; color: var(--text);
+  transition: border-color .15s, background .15s;
 }
-.rowbtn:active{border-color:var(--amber-dim);}
+.rowbtn:active{border-color:var(--amber); background: rgba(255,255,255,0.05);}
 .rowbtn .num{
   width:30px; height:30px; border-radius:9px; background:var(--bg); color:var(--dim);
   font-size:13px; font-weight:800; display:flex; align-items:center; justify-content:center; flex:0 0 auto;
 }
+.rowbtn.current{border-color:var(--amber-dim); background: rgba(255, 184, 77, 0.05);}
 .rowbtn.current .num{background:var(--amber); color:#181206;}
 .rowbtn .rt{flex:1; min-width:0;}
 .rowbtn .rt .a{font-size:15px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
@@ -216,22 +261,25 @@ select.chip{appearance:none; -webkit-appearance:none; text-align:center; text-al
   width:100%; background:var(--bg); border:1px solid var(--line); border-radius:12px;
   color:var(--text); font:inherit; font-size:15px; padding:12px 14px; outline:none;
   -webkit-user-select:text; user-select:text;
+  transition: border-color .15s, box-shadow .15s;
 }
-.field input:focus,.field textarea:focus{border-color:var(--amber-dim);}
+.field input:focus,.field textarea:focus{border-color:var(--amber); box-shadow: 0 0 0 2px var(--amber-dim);}
 .field .hint{font-size:12px; color:var(--faint); margin-top:6px; line-height:1.45;}
 .field .hint a{color:var(--amber); text-decoration:none;}
 textarea{min-height:110px; resize:vertical;}
 
 .primary{
-  width:100%; height:52px; border-radius:14px; background:var(--amber); color:#181206;
-  font-size:15px; font-weight:800; margin-top:4px;
+  width:100%; height:52px; border-radius:14px; background:linear-gradient(135deg, var(--amber), #ff981a); color:#181206;
+  font-size:15px; font-weight:800; margin-top:4px; border:1px solid rgba(255,255,255,0.2);
+  transition: transform .15s, opacity .15s;
 }
 .secondary{
   width:100%; height:48px; border-radius:14px; background:var(--panel-2); border:1px solid var(--line);
   color:var(--text); font-size:14px; font-weight:700; margin-top:10px;
+  transition: transform .15s, opacity .15s, border-color .15s;
 }
-.primary:active,.secondary:active{opacity:.85;}
-.primary[disabled]{opacity:.4;}
+.primary:active,.secondary:active{opacity:.85; transform: scale(0.98);}
+.primary[disabled]{opacity:.4; pointer-events:none;}
 
 .togglerow{display:flex; align-items:center; justify-content:space-between; padding:13px 2px; border-bottom:1px solid var(--line);}
 .togglerow:last-of-type{border-bottom:0;}
@@ -255,18 +303,38 @@ textarea{min-height:110px; resize:vertical;}
 /* toast + flash */
 #toast{
   position:fixed; left:50%; bottom:calc(var(--sab) + 100px); transform:translateX(-50%) translateY(16px);
-  background:#2a2e36; color:var(--text); border:1px solid var(--line);
+  background:rgba(42, 46, 54, 0.9); color:var(--text); border:1px solid var(--line);
   padding:11px 18px; border-radius:999px; font-size:13.5px; font-weight:600;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   opacity:0; pointer-events:none; transition:all .22s; z-index:99; max-width:88vw; text-align:center;
 }
 #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
 #flash{position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:5;}
-#flash.go{animation:fl .1s ease-out;}
-@keyframes fl{from{opacity:.22;} to{opacity:0;}}
+#flash.go{animation:fl .15s ease-out;}
+@keyframes fl{from{opacity:.35;} to{opacity:0;}}
+
+#volPopover {
+  margin: 0; position: absolute; inset: unset; top: 60px; right: 64px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  padding: 16px 16px 12px 16px; color: var(--text); box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  opacity: 0; transform: translateY(-10px);
+  transition: opacity 0.2s, transform 0.2s, display 0.2s allow-discrete, overlay 0.2s allow-discrete;
+}
+#volPopover:popover-open {
+  opacity: 1; transform: translateY(0);
+  @starting-style { opacity: 0; transform: translateY(-10px); }
+}
 
 @media (prefers-reduced-motion:reduce){
   .bpm-num.pulse,#flash.go{animation:none;}
-  .sheet,.card{transition:none;}
+  .sheet, .card {
+    transition: display 0.1s allow-discrete, overlay 0.1s allow-discrete, opacity 0.1s ease-out !important;
+    transform: none !important;
+  }
+  @starting-style {
+    .sheet[open] { transform: none !important; }
+  }
 }
 @media (max-height:700px){
   .lamps-hint{display:none;}
@@ -276,7 +344,6 @@ textarea{min-height:110px; resize:vertical;}
 }
 @media (min-width:600px){
   body{max-width:480px; margin:0 auto;}
-  .sheet{max-width:480px; margin:0 auto;}
 }
 @media (min-width:700px) and (min-height:900px){   /* iPad */
   body,.sheet{max-width:600px;}
@@ -358,7 +425,17 @@ textarea{min-height:110px; resize:vertical;}
   <button class="set-pill" id="setPill">
     <span class="dot"></span><span id="setPillText">No set loaded — tap to load</span>
   </button>
+  <button class="iconbtn" id="volBtn" popovertarget="volPopover" aria-label="Volume">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+  </button>
   <button class="iconbtn" id="settingsBtn" aria-label="Settings">&#9881;&#65038;</button>
+</div>
+
+<div id="volPopover" popover>
+  <div class="field" style="margin-bottom:0; min-width: 180px;">
+    <label>Volume</label>
+    <input type="range" id="volSliderQuick" min="0" max="100" value="80" style="width:100%">
+  </div>
 </div>
 
 <div class="carousel" id="carousel"></div>
@@ -398,24 +475,23 @@ textarea{min-height:110px; resize:vertical;}
 </div>
 
 <!-- SET SHEET -->
-<div class="backdrop" id="backdrop"></div>
-<div class="sheet" id="setSheet">
+<dialog class="sheet" id="setSheet" closedby="any">
   <div class="grab"></div>
   <header>
     <button class="back" id="setBack" style="visibility:hidden">&#8249; Back</button>
     <h2 id="setSheetTitle" style="text-align:center">Your set</h2>
-    <button class="close" data-close>&#10005;</button>
+    <form method="dialog"><button class="close" type="submit">&#10005;</button></form>
   </header>
   <div class="body" id="setBody"></div>
-</div>
+</dialog>
 
 <!-- SETTINGS SHEET -->
-<div class="sheet" id="settingsSheet">
+<dialog class="sheet" id="settingsSheet" closedby="any">
   <div class="grab"></div>
   <header>
     <span style="width:52px"></span>
     <h2 style="text-align:center">Settings</h2>
-    <button class="close" data-close>&#10005;</button>
+    <form method="dialog"><button class="close" type="submit">&#10005;</button></form>
   </header>
   <div class="body" id="settingsBody">
 
@@ -453,7 +529,7 @@ textarea{min-height:110px; resize:vertical;}
 
 
   </div>
-</div>
+</dialog>
 
 <div id="toast"></div>
 <div id="flash"></div>
@@ -1177,8 +1253,23 @@ function updateSetPill() {
 }
 
 /* ---------------- sheets / toast ---------------- */
-function openSheet(id) { $("#backdrop").classList.add("show"); $("#" + id).classList.add("show"); }
-function closeSheets() { $("#backdrop").classList.remove("show"); $$(".sheet").forEach((s) => s.classList.remove("show")); }
+function openSheet(id) { document.getElementById(id).showModal(); }
+function closeSheets() { $$("dialog.sheet[open]").forEach((s) => s.close()); }
+
+// Fallback for browsers without closedby support
+if (!('closedBy' in HTMLDialogElement.prototype)) {
+  $$("dialog").forEach(dialog => {
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) {
+        const rect = dialog.getBoundingClientRect();
+        if (event.clientY < rect.top || event.clientY > rect.top + rect.height || 
+            event.clientX < rect.left || event.clientX > rect.left + rect.width) {
+          dialog.close();
+        }
+      }
+    });
+  });
+}
 let toastT = null;
 function toast(msg, ms = 3200) {
   const t = $("#toast");
@@ -1197,7 +1288,11 @@ function reflectSettings() {
     b.style.borderColor = on ? "var(--amber)" : "var(--line)";
     b.style.color = on ? "var(--amber)" : "var(--text)";
   });
-  $("#volSlider").value = Math.round(state.vol * 100);
+  const val = Math.round(state.vol * 100);
+  $("#volSlider").value = val;
+  $("#volSliderQuick").value = val;
+  $("#volSlider").style.setProperty("--fill", val + "%");
+  $("#volSliderQuick").style.setProperty("--fill", val + "%");
   $("#wakeSw").classList.toggle("on", state.wake);
   $("#flashSw").classList.toggle("on", state.flash);
   $("#pcoRelay").value = state.creds.relay;
@@ -1259,8 +1354,6 @@ function wire() {
 
   $("#setPill").addEventListener("click", () => { viewHome(); openSheet("setSheet"); });
   $("#settingsBtn").addEventListener("click", () => { reflectSettings(); openSheet("settingsSheet"); });
-  $("#backdrop").addEventListener("click", closeSheets);
-  $$("[data-close]").forEach((b) => b.addEventListener("click", closeSheets));
   $("#setBack").addEventListener("click", () => {
     const prev = setNav.pop();
     if (!prev || prev === "home") viewHome();
@@ -1272,11 +1365,17 @@ function wire() {
     state.sound = b.dataset.snd; reflectSettings(); persistSettings();
     if (ctx) { initAudio(); clickAt(ctx.currentTime + 0.01, 2); }
   }));
-  $("#volSlider").addEventListener("input", (e) => {
+  const updateVol = (e) => {
     state.vol = +e.target.value / 100;
+    $("#volSlider").value = e.target.value;
+    $("#volSliderQuick").value = e.target.value;
+    $("#volSlider").style.setProperty("--fill", e.target.value + "%");
+    $("#volSliderQuick").style.setProperty("--fill", e.target.value + "%");
     if (master) master.gain.value = state.vol;
     persistSettings();
-  });
+  };
+  $("#volSlider").addEventListener("input", updateVol);
+  $("#volSliderQuick").addEventListener("input", updateVol);
   $("#wakeSw").addEventListener("click", () => {
     state.wake = !state.wake; reflectSettings(); persistSettings();
     if (state.playing) state.wake ? requestWake() : releaseWake();
