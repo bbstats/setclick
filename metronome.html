@@ -1220,10 +1220,11 @@ function escapeHtml(s) {
 let lastNonZeroVol = 0.8;
 function setVolume(v, persist = true) {
   v = Math.max(0, Math.min(1, v));
+  v = Math.round(v * 100) / 100; // prevent float drift from repeated nudges
+  if (v === 0) v = 0;            // normalize -0 after rounding
   state.vol = v;
   if (v > 0) lastNonZeroVol = v;
-  if (master) master.gain.value = state.vol;
-
+  if (master) master.gain.value = v;
   const pct = Math.round(v * 100);
 
   const volBtn = $("#volBtn");
