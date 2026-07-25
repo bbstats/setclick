@@ -358,6 +358,7 @@ textarea{min-height:110px; resize:vertical;}
   <button class="set-pill" id="setPill">
     <span class="dot"></span><span id="setPillText">No set loaded — tap to load</span>
   </button>
+  <button class="iconbtn" id="volBtn" aria-label="Volume">🔊</button>
   <button class="iconbtn" id="settingsBtn" aria-label="Settings">&#9881;&#65038;</button>
 </div>
 
@@ -397,6 +398,31 @@ textarea{min-height:110px; resize:vertical;}
   </div>
 </div>
 
+<!-- VOLUME SHEET -->
+<div class="sheet" id="volSheet">
+  <div class="grab"></div>
+  <header>
+    <span style="width:52px"></span>
+    <h2 style="text-align:center">Volume</h2>
+    <button class="close" data-close>&#10005;</button>
+  </header>
+  <div class="body" id="volBody">
+    <div style="text-align:center; margin:14px 0 20px;">
+      <div id="volPctText" style="font-size:48px; font-weight:800; color:var(--amber); font-variant-numeric:tabular-nums; line-height:1;">80%</div>
+    </div>
+    <div class="field">
+      <div class="sliderrow">
+        <button class="step" id="volMinus">&#8722;</button>
+        <input type="range" id="homeVolSlider" min="0" max="100" value="80" style="flex:1; --fill:80%" aria-label="Volume">
+        <button class="step" id="volPlus">+</button>
+      </div>
+    </div>
+    <div class="btnrow" style="margin-top:16px;">
+      <button class="chip" id="muteBtn" style="flex:1;">Mute</button>
+    </div>
+  </div>
+</div>
+
 <!-- SET SHEET -->
 <div class="backdrop" id="backdrop"></div>
 <div class="sheet" id="setSheet">
@@ -430,7 +456,7 @@ textarea{min-height:110px; resize:vertical;}
 
     <div class="field">
       <label>Volume</label>
-      <input type="range" id="volSlider" min="0" max="100" value="80" style="width:100%">
+      <input type="range" id="volSlider" min="0" max="100" value="80" style="width:100%; --fill:80%">
     </div>
 
     <div class="togglerow">
@@ -1191,13 +1217,49 @@ function escapeHtml(s) {
 }
 
 /* ---------------- settings ---------------- */
+let lastNonZeroVol = 0.8;
+function setVolume(v, persist = true) {
+  v = Math.max(0, Math.min(1, v));
+  state.vol = v;
+  if (v > 0) lastNonZeroVol = v;
+  if (master) master.gain.value = state.vol;
+
+  const pct = Math.round(v * 100);
+
+  const volBtn = $("#volBtn");
+  if (volBtn) {
+    volBtn.textContent = v === 0 ? "🔇" : v < 0.33 ? "🔈" : v < 0.66 ? "🔉" : "🔊";
+  }
+
+  const volPctText = $("#volPctText");
+  if (volPctText) {
+    volPctText.textContent = v === 0 ? "Muted" : pct + "%";
+  }
+
+  const muteBtn = $("#muteBtn");
+  if (muteBtn) {
+    muteBtn.textContent = v === 0 ? "Unmute" : "Mute";
+    muteBtn.style.color = v === 0 ? "var(--red)" : "var(--text)";
+  }
+
+  ["#volSlider", "#homeVolSlider"].forEach((id) => {
+    const sl = $(id);
+    if (sl) {
+      sl.value = pct;
+      sl.style.setProperty("--fill", pct + "%");
+    }
+  });
+
+  if (persist) persistSettings();
+}
+
 function reflectSettings() {
   $$(".snd").forEach((b) => {
     const on = b.dataset.snd === state.sound;
     b.style.borderColor = on ? "var(--amber)" : "var(--line)";
     b.style.color = on ? "var(--amber)" : "var(--text)";
   });
-  $("#volSlider").value = Math.round(state.vol * 100);
+  setVolume(state.vol, false);
   $("#wakeSw").classList.toggle("on", state.wake);
   $("#flashSw").classList.toggle("on", state.flash);
   $("#pcoRelay").value = state.creds.relay;
@@ -1272,11 +1334,12 @@ function wire() {
     state.sound = b.dataset.snd; reflectSettings(); persistSettings();
     if (ctx) { initAudio(); clickAt(ctx.currentTime + 0.01, 2); }
   }));
-  $("#volSlider").addEventListener("input", (e) => {
-    state.vol = +e.target.value / 100;
-    if (master) master.gain.value = state.vol;
-    persistSettings();
-  });
+  $("#volBtn").addEventListener("click", () => { setVolume(state.vol, false); openSheet("volSheet"); });
+  $("#volSlider").addEventListener("input", (e) => setVolume(+e.target.value / 100));
+  $("#homeVolSlider").addEventListener("input", (e) => setVolume(+e.target.value / 100));
+  holdRepeat($("#volMinus"), () => setVolume(state.vol - 0.05));
+  holdRepeat($("#volPlus"), () => setVolume(state.vol + 0.05));
+  $("#muteBtn").addEventListener("click", () => setVolume(state.vol > 0 ? 0 : (lastNonZeroVol || 0.8)));
   $("#wakeSw").addEventListener("click", () => {
     state.wake = !state.wake; reflectSettings(); persistSettings();
     if (state.playing) state.wake ? requestWake() : releaseWake();
