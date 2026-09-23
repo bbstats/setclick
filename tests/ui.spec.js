@@ -48,6 +48,16 @@ test("count-in shows COUNT IN instead of BPM", async ({ page }) => {
   expect(after).toBe('"COUNT IN"');
 });
 
+test("Click is the default sound, and the chosen sound survives a reload", async ({ page }) => {
+  await open(page);
+  expect(await page.evaluate(() => state.sound)).toBe("click");
+  await page.click("#settingsBtn");
+  await page.click('.snd[data-snd="wood"]');
+  await page.reload();
+  await open(page);
+  expect(await page.evaluate(() => state.sound)).toBe("wood");
+});
+
 test("WEAK and FEEL are saved per song", async ({ page }) => {
   await open(page);
   await page.click("#weakChip");

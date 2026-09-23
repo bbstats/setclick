@@ -563,7 +563,7 @@ const $$ = (s) => Array.from(document.querySelectorAll(s));
 const state = {
   bpm: 120, beats: 4, denom: 4, subdiv: 1,
   accents: [2, 1, 1, 1],          // 2 accent, 1 normal, 0 mute
-  sound: "stick", vol: 0.8, muted: false,   // mute is never persisted
+  sound: "click", vol: 0.8, muted: false,   // mute is never persisted
   weak: 0.5,                       // per song: weak-beat volume (1 = same as accents)
   accentPitch: false,              // accents/subdivisions change pitch, not just volume
   dotted: false,                   // "6/8 in 2": BPM counts dotted quarters, not eighths
@@ -1794,7 +1794,7 @@ async function init() {
   if (Array.isArray(sets)) library = sets;
   if (creds) state.creds = Object.assign(state.creds, creds);
   if (settings) {
-    state.sound = settings.sound === "wood" ? "stick" : (settings.sound || state.sound);
+    state.sound = settings.sound || state.sound;
     if (settings.vol > 0) state.vol = settings.vol;   // never boot silent: a saved 0 falls back to default
     state.wake = settings.wake ?? state.wake;
     state.flash = settings.flash ?? state.flash;
