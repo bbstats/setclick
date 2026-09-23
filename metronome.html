@@ -120,6 +120,8 @@ button{border:0; background:none; padding:0; cursor:pointer;}
 @keyframes pulse{from{transform:scale(1.035); text-shadow:0 0 44px rgba(255,174,66,.45);} to{transform:scale(1);}}
 .bpm-num.count{color:var(--red); text-shadow:0 0 36px rgba(255,79,63,.3);}
 .bpm-label{font-size:13px; letter-spacing:.42em; color:var(--faint); font-weight:700; margin-top:2px;}
+.bpm-num.count + .bpm-label{font-size:0;}         /* "1 BPM" during count-in read wrong */
+.bpm-num.count + .bpm-label::after{content:"COUNT IN"; font-size:13px; letter-spacing:.42em; color:var(--red);}
 
 /* beat lamps */
 .lamps{display:flex; gap:12px; margin-top:18px; flex-wrap:wrap; justify-content:center; max-width:320px;}
@@ -384,6 +386,8 @@ textarea{min-height:110px; resize:vertical;}
   .sliderrow{gap:10px;}
   .volrow{margin-top:0;}
   .volmute{width:28px; height:28px;}
+  .lamps{flex-wrap:nowrap; gap:8px; max-width:none;}   /* 12/8 wrapped onto the tempo slider */
+  .lamp{width:20px; height:20px;}
 }
 </style>
 </head>
