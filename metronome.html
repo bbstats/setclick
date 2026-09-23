@@ -9,6 +9,9 @@
 <meta name="apple-mobile-web-app-title" content="SetClick">
 <meta name="theme-color" content="#101215">
 <title>SetClick — Setlist Metronome</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 <style>
 :root{
   --bg:#101215; --panel:#1a1d22; --panel-2:#22262d; --line:#2e333b;
@@ -223,6 +226,21 @@ select.chip{appearance:none; -webkit-appearance:none; text-align:center; text-al
 .rowbtn .rt .b{font-size:12px; color:var(--dim); margin-top:2px;}
 .rowbtn .bpm{font-size:19px; font-weight:800; color:var(--amber); font-variant-numeric:tabular-nums; flex:0 0 auto;}
 .rowbtn .bpm.none{color:var(--faint); font-size:14px; font-weight:600;}
+
+.sethead{display:flex; align-items:center; justify-content:space-between; gap:10px; margin:2px 0 8px;}
+.sethead .name{font-size:12px; font-weight:700; letter-spacing:.06em; color:var(--dim); text-transform:uppercase;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.linkbtn{font-size:15px; font-weight:700; color:var(--amber); padding:6px 4px; flex:0 0 auto;}
+.editrow{padding:10px 10px 10px 16px; gap:8px;}
+.ebtn{
+  width:38px; height:38px; border-radius:10px; background:var(--bg); border:1px solid var(--line);
+  color:var(--dim); font-size:12px; flex:0 0 auto; display:flex; align-items:center; justify-content:center;
+}
+.ebtn:active{border-color:var(--amber-dim);}
+.ebtn[disabled]{opacity:.3;}
+.ebtn.del{color:var(--red);}
+.addrow{display:flex; gap:8px;}
+.addrow .chip{flex:0 0 76px; height:auto;}
 
 .field{margin-bottom:14px;}
 .field label{display:block; font-size:12px; font-weight:700; letter-spacing:.06em; color:var(--dim); margin-bottom:6px; text-transform:uppercase;}
@@ -946,17 +964,31 @@ function showLoading(msg) {
   setView(`<div class="loading-line"><span class="spin"></span>&nbsp; ${msg}</div>`, "Loading", setNav.length > 0);
 }
 
+let editingSet = false;
 function viewHome() {
   setNav.length = 0;
   let html = "";
   if (state.set && state.set.songs.length) {
+    const head = `<div class="sethead"><span class="name">${escapeHtml(state.set.name)}</span>
+      <button class="linkbtn" id="editSetBtn">${editingSet ? "Done" : "Edit"}</button></div>`;
+    if (editingSet) {
+      setView(head + state.set.songs.map(editRow).join("") + `
+        <div class="field" style="margin-top:16px">
+          <label for="addTxt">Add a song</label>
+          <div class="addrow">
+            <input type="text" id="addTxt" autocomplete="off" placeholder="Title 126 4/4">
+            <button class="chip" id="addBtn">Add</button>
+          </div>
+        </div>`, "Edit set", false);
+      wireEditView();
+      return;
+    }
     if (state.set.demo) {
       html += `<div class="notice" style="margin-top:6px">This is a <b>demo set</b> so you can feel the app. Load your real set and the titles, BPMs, and meters come straight from <b>Planning Center</b>.</div>`;
-      html += state.set.songs.map((s, i) => songRow(s, i)).join("");
+      html += head + state.set.songs.map((s, i) => songRow(s, i)).join("");
       html += `<button class="primary" id="loadPcoBtn" style="margin-top:8px">Load my set from Planning Center</button>`;
     } else {
-      html += `<div class="field" style="margin-top:2px"><label>${escapeHtml(state.set.name)}</label></div>`;
-      html += state.set.songs.map((s, i) => songRow(s, i)).join("");
+      html += head + state.set.songs.map((s, i) => songRow(s, i)).join("");
       if (state.set.src)
         html += `<button class="secondary" id="reimportBtn">Re-import this set — discard my changes</button>`;
       html += `<button class="secondary" id="loadPcoBtn">Load a different set from Planning Center</button>`;
@@ -967,6 +999,8 @@ function viewHome() {
   }
   html += `<button class="secondary" id="manualBtn">Type or paste a set manually</button>`;
   setView(html, state.set ? "Your set" : "Load a set", false);
+  const eb = $("#editSetBtn");
+  if (eb) eb.addEventListener("click", () => { editingSet = true; viewHome(); });
   $("#loadPcoBtn").addEventListener("click", goServiceTypes);
   $("#manualBtn").addEventListener("click", viewManual);
   const ri = $("#reimportBtn");
@@ -985,6 +1019,55 @@ function songRow(s, i) {
       <div class="rt"><div class="a">${escapeHtml(s.title)}</div>${meta ? `<div class="b">${escapeHtml(meta)}</div>` : ""}</div>
       ${bpm}
     </button>`;
+}
+
+function editRow(s, i, all) {
+  const meta = [s.bpm ? s.bpm + " BPM" : "no BPM", s.key, s.meter].filter(Boolean).join(" · ");
+  return `<div class="rowbtn editrow${i === state.songIx ? " current" : ""}">
+      <div class="num">${i + 1}</div>
+      <div class="rt"><div class="a">${escapeHtml(s.title)}</div><div class="b">${escapeHtml(meta)}</div></div>
+      <button class="ebtn" data-act="up" data-i="${i}" aria-label="Move up"${i === 0 ? " disabled" : ""}>&#9650;</button>
+      <button class="ebtn" data-act="down" data-i="${i}" aria-label="Move down"${i === all.length - 1 ? " disabled" : ""}>&#9660;</button>
+      <button class="ebtn del" data-act="del" data-i="${i}" aria-label="Remove">&#10005;</button>
+    </div>`;
+}
+
+function wireEditView() {
+  $("#editSetBtn").addEventListener("click", () => { editingSet = false; viewHome(); });
+  $$("#setBody .ebtn").forEach((b) => b.addEventListener("click", () => {
+    const i = +b.dataset.i, act = b.dataset.act;
+    if (act === "del") {
+      if (state.set.songs.length === 1) { toast("A set needs at least one song"); return; }
+      if (!confirm(`Remove "${state.set.songs[i].title}" from the set?`)) return;
+      editSet((songs) => songs.splice(i, 1));
+    } else {
+      const j = act === "up" ? i - 1 : i + 1;
+      editSet((songs) => { [songs[i], songs[j]] = [songs[j], songs[i]]; });
+    }
+  }));
+  const add = () => {
+    const [song] = parseManual($("#addTxt").value);
+    if (!song) { toast("Type a title, then BPM and meter if you have them"); return; }
+    editSet((songs) => songs.push(song));
+    $("#addTxt").focus();
+  };
+  $("#addBtn").addEventListener("click", add);
+  $("#addTxt").addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
+}
+
+// Apply a change to the song list, keeping the current song selected if it survived.
+function editSet(mutate) {
+  const songs = state.set.songs, cur = songs[state.songIx];
+  mutate(songs);
+  let ix = songs.indexOf(cur);
+  const lost = ix < 0;
+  if (lost) ix = Math.min(state.songIx, songs.length - 1);
+  state.songIx = ix;
+  store.set("setCache", state.set);
+  updateSetPill(); buildCarousel();
+  if (lost) loadSong(ix, { instant: true, silent: true });
+  else { updateNextBtn(); scrollToCard(ix, false); store.set("songIx", ix); }
+  viewHome();
 }
 
 async function goServiceTypes() {
@@ -1300,7 +1383,7 @@ function wire() {
 
   $("#carousel").addEventListener("scroll", onCarouselScroll, { passive: true });
 
-  $("#setPill").addEventListener("click", () => { viewHome(); openSheet("setSheet"); });
+  $("#setPill").addEventListener("click", () => { editingSet = false; viewHome(); openSheet("setSheet"); });
   $("#settingsBtn").addEventListener("click", () => { reflectSettings(); openSheet("settingsSheet"); });
   $("#backdrop").addEventListener("click", closeSheets);
   $$("[data-close]").forEach((b) => b.addEventListener("click", closeSheets));
@@ -1377,6 +1460,8 @@ async function init() {
   const ix = Number.isInteger(songIx) ? Math.max(0, Math.min(songIx, cached.songs.length - 1)) : 0;
   loadSong(ix, { instant: true, silent: true });
   reflectSettings(); applyVolume();
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http"))
+    navigator.serviceWorker.register("sw.js").catch(() => {});   // offline support
   window.addEventListener("pagehide", persistSettings);
 }
 init();
