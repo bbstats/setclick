@@ -113,31 +113,62 @@ test.describe("hold a song on the main screen to move it", () => {
     expect(await titles(page)).toEqual(["Goodness of God@126", "King of Kings@136", "Build My Life@69"]);
   });
 
-  test.describe("on a touchscreen", () => {
-    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  test.describe("on an Android phone", () => {
+    const { defaultBrowserType, ...pixel } = require("@playwright/test").devices["Pixel 7"];
+    test.use(pixel);
 
     // Real touch input (not mouse), so the browser's own swipe-to-scroll is in play.
-    async function touch(page, points) {
-      const cdp = await page.context().newCDPSession(page);
-      for (const [type, x, y, wait] of points) {
+    // Rows: [type, x, y, then wait ms].
+    const sessions = new WeakMap();                            // one session per page keeps the finger down between calls
+    async function touch(page, rows) {
+      if (!sessions.has(page)) sessions.set(page, await page.context().newCDPSession(page));
+      const cdp = sessions.get(page);
+      for (const [type, x, y, wait] of rows) {
         await cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y }] });
         if (wait) await page.waitForTimeout(wait);
       }
     }
+    const center = async (page, i) => {
+      const c = await page.locator("#carousel .card").nth(i).boundingBox();
+      return [c.x + c.width / 2, c.y + c.height / 2];
+    };
+    // A finger held "still" still wobbles a pixel or two.
+    const holdStill = (x, y, ms) => Array.from({ length: ms / 100 }, (_, i) => ["touchMove", x + (i % 2 ? 2 : -2), y + 1, 100]);
+    const slide = (x, y, dx, n) => Array.from({ length: n }, (_, i) => ["touchMove", x + ((i + 1) * dx) / n, y, 16]);
 
-    test("hold and drag moves the song instead of scrolling", async ({ page }) => {
-      const c = await page.locator("#carousel .card").nth(0).boundingBox();
-      const x = c.x + c.width / 2, y = c.y + c.height / 2;
-      const path = Array.from({ length: 10 }, (_, i) => ["touchMove", x + (i + 1) * 17, y, 16]);
-      await touch(page, [["touchStart", x, y, 500], ...path, ["touchMove", 380, y, 700], ["touchEnd"]]);
+    test("hold the first song, drag it right: it moves and visibly lifts", async ({ page }) => {
+      const [x, y] = await center(page, 0);
+      await touch(page, [["touchStart", x, y, 100], ...holdStill(x, y, 700)]);
+      expect(await page.evaluate(() => {
+        const c = document.querySelector("#carousel .card.dragging");
+        return c && c.dataset.ix === "0" && c.style.transform.includes("scale");
+      })).toBe(true);
+      const edge = page.viewportSize().width - 15;
+      await touch(page, [...slide(x, y, edge - x, 12), ["touchMove", edge, y, 900], ["touchEnd"]]);
+      expect(await titles(page)).toEqual(["King of Kings@136", "Build My Life@69", "Goodness of God@126"]);
+    });
+
+    test("holding a song peeking in at the edge doesn't send it flying", async ({ page }) => {
+      const c = await page.locator("#carousel .card").nth(1).boundingBox();
+      const x = Math.min(c.x + 25, page.viewportSize().width - 10), y = c.y + c.height / 2;
+      await touch(page, [["touchStart", x, y, 100], ...holdStill(x, y, 1200), ["touchEnd", 0, 0, 300]]);
+      expect(await titles(page)).toEqual(["Goodness of God@126", "King of Kings@136", "Build My Life@69"]);
+      expect(await page.evaluate(() => state.songIx)).toBe(0);
+    });
+
+    test("a pointercancel partway through (some Android builds) doesn't drop the drag", async ({ page }) => {
+      const [x, y] = await center(page, 0);
+      await touch(page, [["touchStart", x, y, 100], ...holdStill(x, y, 600), ...slide(x, y, 40, 3)]);
+      await page.evaluate(() => document.querySelector("#carousel .card.dragging")
+        .dispatchEvent(new PointerEvent("pointercancel", { pointerType: "touch", pointerId: 1, bubbles: true })));
+      const edge = page.viewportSize().width - 15;
+      await touch(page, [...slide(x + 40, y, edge - x - 40, 10), ["touchMove", edge, y, 900], ["touchEnd"]]);
       expect(await titles(page)).toEqual(["King of Kings@136", "Build My Life@69", "Goodness of God@126"]);
     });
 
     test("a quick swipe just browses", async ({ page }) => {
-      const c = await page.locator("#carousel .card").nth(0).boundingBox();
-      const x = c.x + c.width / 2, y = c.y + c.height / 2;
-      const path = Array.from({ length: 8 }, (_, i) => ["touchMove", x - (i + 1) * 20, y, 16]);
-      await touch(page, [["touchStart", x, y, 30], ...path, ["touchEnd", 0, 0, 600]]);
+      const [x, y] = await center(page, 0);
+      await touch(page, [["touchStart", x, y, 30], ...slide(x, y, -160, 8), ["touchEnd", 0, 0, 600]]);
       expect(await titles(page)).toEqual(["Goodness of God@126", "King of Kings@136", "Build My Life@69"]);
     });
   });

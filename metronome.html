@@ -71,7 +71,8 @@ button{border:0; background:none; padding:0; cursor:pointer;}
   transform:scale(.965);
 }
 .card{-webkit-touch-callout:none;}
-.card.dragging{transition:none; z-index:2; opacity:1; border-color:var(--amber-dim); box-shadow:0 12px 32px rgba(0,0,0,.55);}
+#carousel .card.dragging{transition:none; z-index:2; opacity:1; border-color:var(--amber); box-shadow:0 0 0 2px var(--amber), 0 16px 40px rgba(0,0,0,.6);}
+.carousel.reordering .card:not(.dragging){opacity:.3;}   /* picked up: the others fade back */
 .carousel.reordering{scroll-snap-type:none;}
 .card.active{
   opacity:1; transform:scale(1);
@@ -1403,10 +1404,13 @@ function dragRow(e) {
 }
 
 // Drag items[from] along an axis ("x" or "y") inside `scroller`: the others slide out of
-// the way, the scroller follows near its edges, and the drop is one move through editSet.
-// `handle` receives the rest of the pointer's events; onEnd runs once it's all over.
-function dragReorder(e, handle, items, from, scroller, axis, onEnd = () => {}) {
-  const Y = axis === "y";
+// the way, the scroller follows once you drag toward an edge, and the drop is one move
+// through editSet. `handle` gets pointer capture; `lift` is extra transform for the
+// dragged item; onEnd runs once it's all over.
+// Touch drags follow the touch events to the end: some Android builds send pointercancel
+// partway through a long press even though the page is handling the move.
+function dragReorder(e, handle, items, from, scroller, axis, { lift = "", onEnd = () => {} } = {}) {
+  const Y = axis === "y", touch = e.pointerType === "touch";
   const pos = (ev) => (Y ? ev.clientY : ev.clientX);
   const scrolled = () => (Y ? scroller.scrollTop : scroller.scrollLeft);
   const start = (el) => (Y ? el.offsetTop : el.offsetLeft);
@@ -1415,11 +1419,11 @@ function dragReorder(e, handle, items, from, scroller, axis, onEnd = () => {}) {
   const item = items[from];
   const pitch = items.length > 1 ? start(items[1]) - start(items[0]) : size(item);
   const mids = items.map((r) => start(r) + size(r) / 2);
-  const p0 = pos(e) + scrolled();
-  let p = pos(e), to = from, raf = 0;
+  const pStart = pos(e), p0 = pStart + scrolled();
+  let p = pStart, to = from, raf = 0, done = false;
   const place = () => {
     const d = p + scrolled() - p0, c = mids[from] + d;
-    item.style.transform = shiftBy(d);
+    item.style.transform = (shiftBy(d) + " " + lift).trim();
     to = mids.filter((m, i) => i !== from && m < c).length;
     items.forEach((r, i) => {
       if (i === from) return;
@@ -1427,28 +1431,35 @@ function dragReorder(e, handle, items, from, scroller, axis, onEnd = () => {}) {
     });
   };
   const tick = () => {
+    // Scroll only once you've dragged toward that edge: songs peeking in at the
+    // edges start out inside the zone, and just holding one mustn't scroll.
     const r = scroller.getBoundingClientRect(), lo = Y ? r.top : r.left, hi = Y ? r.bottom : r.right;
-    const step = p < lo + 48 ? -8 : p > hi - 48 ? 8 : 0;
+    const went = p - pStart;
+    const step = p < lo + 48 && went < -24 ? -8 : p > hi - 48 && went > 24 ? 8 : 0;
     if (step) { if (Y) scroller.scrollTop += step; else scroller.scrollLeft += step; }
     place();
     raf = requestAnimationFrame(tick);
   };
-  const move = (ev) => { p = pos(ev); };
+  const mine = (ev) => ev.pointerId === undefined || ev.pointerId === e.pointerId;
+  const move = (ev) => {
+    const pt = ev.touches ? ev.touches[0] : ev;
+    if (pt && mine(ev)) p = pos(pt);
+  };
+  const EVENTS = ["pointermove", "touchmove", "pointerup", "touchend", "touchcancel", "pointercancel"];
   const end = (ev) => {
+    if (done || !mine(ev) || (touch && ev.type === "pointercancel")) return;   // touch: wait for touchend
+    done = true;
     cancelAnimationFrame(raf);
-    handle.removeEventListener("pointermove", move);
-    handle.removeEventListener("pointerup", end);
-    handle.removeEventListener("pointercancel", end);
+    EVENTS.forEach((t) => window.removeEventListener(t, t.endsWith("move") ? move : end));
     item.classList.remove("dragging");
     items.forEach((r) => { r.style.transform = ""; });
-    if (ev.type === "pointerup" && to !== from) editSet((songs) => songs.splice(to, 0, songs.splice(from, 1)[0]));
+    if ((ev.type === "pointerup" || ev.type === "touchend") && to !== from)
+      editSet((songs) => songs.splice(to, 0, songs.splice(from, 1)[0]));
     onEnd();
   };
   item.classList.add("dragging");
   try { handle.setPointerCapture(e.pointerId); } catch (err) {}
-  handle.addEventListener("pointermove", move);
-  handle.addEventListener("pointerup", end);
-  handle.addEventListener("pointercancel", end);
+  EVENTS.forEach((t) => window.addEventListener(t, t.endsWith("move") ? move : end, { passive: true }));
   raf = requestAnimationFrame(tick);
 }
 
@@ -1626,12 +1637,13 @@ function holdToDrag(e) {
     cardDrag = eatClick = suppressCarousel = true;       // the carousel doesn't pick songs mid-drag
     el.classList.add("reordering");
     try { navigator.vibrate?.(10); } catch (err) {}
-    dragReorder(e, card, $$("#carousel .card"), +card.dataset.ix, el, railMode() ? "y" : "x", () => {
+    const onEnd = () => {
       cardDrag = false;
       el.classList.remove("reordering");
       scrollToCard(state.songIx);                        // back to the song you're on (also ends the suppress)
       setTimeout(() => { eatClick = false; }, 0);        // after the click this pointerup makes
-    });
+    };
+    dragReorder(e, card, $$("#carousel .card"), +card.dataset.ix, el, railMode() ? "y" : "x", { lift: "scale(1.06)", onEnd });
   }, HOLD_MS);
   card.addEventListener("pointermove", moved);
   card.addEventListener("pointerup", quit);
