@@ -558,7 +558,7 @@ const store = {
 };
 
 /* ---------------- audio engine ---------------- */
-let ctx = null, master = null, silentEl = null;
+let ctx = null, master = null, bus = null, silentEl = null;
 let timer = null, nextT = 0, beat = 0, sub = 0;
 let phase = "run", countPos = 0, countTotal = 0;
 const AHEAD = 0.14, TICK_MS = 25;
@@ -599,7 +599,7 @@ function speakAt(t, n, accented) {
     g.gain.setValueAtTime(vol, st + Math.max(0.02, dur - 0.03));
     g.gain.linearRampToValueAtTime(0.0001, st + dur);
   }
-  src.connect(g); g.connect(master);
+  src.connect(g); g.connect(bus);
   src.start(st); src.stop(st + dur + 0.01);
 }
 
@@ -621,6 +621,7 @@ function initAudio() {
   master = ctx.createGain();
   master.gain.value = state.muted ? 0 : state.vol;
   master.connect(ctx.destination);
+  newBus();
   ctx.onstatechange = () => {                // e.g. a notification or another app grabbed audio
     if (!state.playing || ctx.state === "running") return;
     ctx.resume().catch(() => {});
@@ -645,7 +646,7 @@ function clickAt(t, kind) {         // kind: 2 accent, 1 beat, 0 subdivision
     const src = ctx.createBufferSource();
     src.buffer = stickBufs[kind === 2 ? "a" : kind === 1 ? "n" : "s"] || stickBufs.n;
     const g = ctx.createGain(); g.gain.value = level * 1.2;
-    src.connect(g); g.connect(master);
+    src.connect(g); g.connect(bus);
     src.start(t);
   } else if (state.sound === "stick") {       // samples not decoded yet: synth fallback
     const len = Math.floor(ctx.sampleRate * 0.05);
@@ -656,7 +657,7 @@ function clickAt(t, kind) {         // kind: 2 accent, 1 beat, 0 subdivision
     const f = ctx.createBiquadFilter(); f.type = "bandpass";
     f.frequency.value = kind === 2 ? 2600 : kind === 1 ? 1800 : 1300; f.Q.value = 7;
     const g = ctx.createGain(); g.gain.value = level * 1.6;
-    src.connect(f); f.connect(g); g.connect(master);
+    src.connect(f); f.connect(g); g.connect(bus);
     src.start(t);
   } else {
     const o = ctx.createOscillator(), g = ctx.createGain();
@@ -673,7 +674,7 @@ function clickAt(t, kind) {         // kind: 2 accent, 1 beat, 0 subdivision
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.032);
       o.start(t); o.stop(t + 0.045);
     }
-    o.connect(g); g.connect(master);
+    o.connect(g); g.connect(bus);
   }
 }
 
@@ -743,6 +744,34 @@ function paintBeat(e) {
 }
 
 let starting = false;
+// Every sound goes through `bus`. Swapping it out silences anything already
+// scheduled (up to AHEAD seconds of clicks) without touching master volume.
+function newBus() {
+  const old = bus;
+  if (old) {
+    old.gain.setTargetAtTime(0, ctx.currentTime, 0.004);   // quick fade, no pop
+    setTimeout(() => old.disconnect(), 100);
+  }
+  bus = ctx.createGain();
+  bus.connect(master);
+}
+
+function resetTake(lead) {                    // start from the top: count-in if the song has one
+  beat = 0; sub = 0; visQ.length = 0;
+  countTotal = state.countIn * state.beats;
+  countPos = 0;
+  phase = countTotal > 0 ? "count" : "run";
+  nextT = ctx.currentTime + lead;
+}
+
+// Song changed while playing: drop what's queued and launch the new song with its count-in.
+function relaunch() {
+  newBus();
+  resetTake(0.25);
+  $$(".lamp").forEach((l) => l.classList.remove("on", "down"));
+  scheduler();
+}
+
 async function start() {
   if (starting || state.playing) return;      // double-tap would leak a second interval
   starting = true;
@@ -750,11 +779,7 @@ async function start() {
   try { await ctx.resume(); } catch (e) {}
   try { await silentEl.play(); } catch (e) {}   // playback session: bypasses mute switch
   starting = false;
-  beat = 0; sub = 0; visQ.length = 0;
-  countTotal = state.countIn * state.beats;
-  countPos = 0;
-  phase = countTotal > 0 ? "count" : "run";
-  nextT = ctx.currentTime + (phase === "count" ? 0.2 : 0.12);
+  resetTake(state.countIn > 0 ? 0.2 : 0.12);
   scheduler();
   timer = setInterval(scheduler, TICK_MS);
   state.playing = true;
@@ -766,6 +791,7 @@ async function start() {
 function stop() {
   if (timer) clearInterval(timer);
   timer = null; state.playing = false; visQ.length = 0; phase = "run";
+  if (ctx) newBus();                          // cut clicks already queued, so STOP is instant
   try { silentEl && silentEl.pause(); } catch (e) {}
   $$(".lamp").forEach((l) => l.classList.remove("on", "down"));
   const num = $("#bpmNum");
@@ -1172,6 +1198,7 @@ function parseManual(text) {
 function loadSong(ix, opts = {}) {
   if (!state.set || !state.set.songs[ix]) return;
   if (opts.fromScroll && ix === state.songIx) return;
+  const changed = ix !== state.songIx;
   state.songIx = ix;
   const s = state.set.songs[ix];
   if (s.meter) applyMeter(s.meter);
@@ -1184,6 +1211,7 @@ function loadSong(ix, opts = {}) {
   updateCountChip();
   if (s.bpm) setBpm(s.bpm);
   else if (!opts.silent) toast("No BPM saved for this song — tap it in or nudge the slider");
+  if (state.playing && changed) relaunch();
   updateCarouselActive();
   updateNextBtn();
   if (!opts.fromScroll) scrollToCard(ix, !opts.instant);
@@ -1276,9 +1304,8 @@ function updateNextBtn() {
 async function nextSongAndGo() {
   const ix = state.songIx + 1;
   if (!state.set || !state.set.songs[ix]) { toast("End of set"); return; }
-  if (state.playing) stop();
-  loadSong(ix);
-  await start();                             // plays that song's own count-in
+  loadSong(ix);                              // relaunches with the song's count-in if playing
+  if (!state.playing) await start();
 }
 
 function updateSetPill() {
