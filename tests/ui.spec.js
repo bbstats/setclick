@@ -70,3 +70,21 @@ test("WEAK and FEEL are saved per song", async ({ page }) => {
   expect(await page.textContent("#weakVal")).toBe("100%");
   expect(await page.textContent("#subVal")).toBe("♪♪");
 });
+
+test("damaged saved data falls back to the demo set instead of breaking", async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => {
+    localStorage.setItem("setclick:setCache", JSON.stringify({ name: "Bad", songs: [null] }));
+    localStorage.setItem("setclick:sets", JSON.stringify([{ id: "x", songs: "nope" }]));
+    localStorage.setItem("setclick:settings", JSON.stringify({ sound: "kazoo" }));
+  });
+  await page.reload();
+  await open(page);
+  expect(await page.evaluate(() => [state.set.demo, library.length, state.sound])).toEqual([true, 0, "click"]);
+});
+
+test("a one-song set says 1 song", async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => useSet({ id: "manual:1", name: "Solo", songs: parseManual("Way Maker 68") }));
+  await expect(page.locator("#setPillText")).toHaveText("Solo · 1 song");
+});
