@@ -1448,7 +1448,9 @@ function wire() {
 
   $$(".snd").forEach((b) => b.addEventListener("click", () => {
     state.sound = b.dataset.snd; reflectSettings(); persistSettings();
-    if (ctx) clickAt(ctx.currentTime + 0.01, 2);
+    // preview only when stopped: mid-play it landed off the beat. Running clicks pick up
+    // the new sound on their own from the next scheduled beat.
+    if (ctx && !state.playing) clickAt(ctx.currentTime + 0.01, 2);
   }));
   $("#volSlider").addEventListener("input", (e) => {
     state.vol = +e.target.value / 100; state.muted = false;
