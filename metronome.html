@@ -1065,13 +1065,13 @@ function viewSets() {
   const cur = state.set && state.set.id;
   const rows = library.map((x) => `<div class="rowbtn setrow${x.id === cur ? " current" : ""}" data-id="${escapeHtml(x.id)}" role="button" tabindex="0">
       <div class="rt"><div class="a">${escapeHtml(x.name)}</div>
-        <div class="b">${x.songs.length} songs · ${x.src ? "Planning Center" : "Typed"}</div></div>
+        <div class="b">${x.songs.length} songs · ${x.src ? "Planning Center" : "Custom"}</div></div>
       ${x.id === cur ? `<span class="nowtag">Open</span>`
         : `<button class="ebtn del" data-del="1" aria-label="Delete saved set">&#10005;</button>`}
     </div>`).join("");
   setView((rows || `<div class="notice" style="margin-top:6px">Sets you load are saved here, with your changes, so they work offline.</div>`) + `
     <button class="primary" id="loadPcoBtn" style="margin-top:8px">From Planning Center</button>
-    <button class="secondary" id="manualBtn">Type a set</button>`, "My sets", true);
+    <button class="secondary" id="manualBtn">New set</button>`, "My sets", true);
   $("#loadPcoBtn").addEventListener("click", goServiceTypes);
   $("#manualBtn").addEventListener("click", viewManual);
   $$("#setBody .setrow").forEach((r) => r.addEventListener("click", (e) => {
@@ -1277,12 +1277,12 @@ function viewManual() {
       <textarea id="manualTxt" placeholder="Goodness of God 126 4/4&#10;King of Kings 132&#10;Build My Life 72 6/8"></textarea>
       <div class="hint">Format: title, then BPM, then meter (optional).</div>
     </div>
-    <button class="primary" id="manualGo">Use this set</button>`, "Manual set", true);
+    <button class="primary" id="manualGo">Create set</button>`, "New set", true);
   $("#manualGo").addEventListener("click", () => {
     const songs = parseManual($("#manualTxt").value);
     if (!songs.length) { toast("Couldn't find any \"title + BPM\" lines"); return; }
     const day = new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    useSet({ id: "manual:" + Date.now(), name: "Typed set · " + day, songs });
+    useSet({ id: "manual:" + Date.now(), name: "New set · " + day, songs });
     viewHome();
   });
 }
