@@ -236,6 +236,10 @@ select.chip{appearance:none; -webkit-appearance:none; text-align:center; text-al
 .sethead .name{font-size:12px; font-weight:700; letter-spacing:.06em; color:var(--dim); text-transform:uppercase;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .linkbtn{font-size:15px; font-weight:700; color:var(--amber); padding:6px 4px; flex:0 0 auto;}
+.linkbtn.dim{color:var(--dim);}
+.headbtns{display:flex; gap:14px; flex:0 0 auto;}
+.setrow{cursor:pointer;}
+.nowtag{font-size:12px; font-weight:800; letter-spacing:.06em; color:var(--amber); text-transform:uppercase; flex:0 0 auto;}
 .editrow{padding:10px 10px 10px 16px; gap:8px;}
 .ebtn{
   width:38px; height:38px; border-radius:10px; background:var(--bg); border:1px solid var(--line);
@@ -837,7 +841,7 @@ document.addEventListener("visibilitychange", () => {
 function saveSongProp(patch) {
   if (!state.set || state.songIx < 0) return;
   Object.assign(state.set.songs[state.songIx], patch);
-  store.set("setCache", state.set);
+  saveSet();
 }
 
 function setBpm(v, fromSlider) {
@@ -849,7 +853,7 @@ function setBpm(v, fromSlider) {
   sl.style.setProperty("--fill", (((v - 30) / 250) * 100).toFixed(1) + "%");
   if (state.set && state.songIx >= 0) {          // remember nudges for this gig
     state.set.songs[state.songIx].bpm = v;
-    store.set("setCache", state.set);
+    saveSet();
     updateActiveCardBpm();
   }
 }
@@ -989,6 +993,7 @@ async function fetchSetlist(stId, planId, planLabel) {
       const bpm = bpmRaw ? Math.round(Number(bpmRaw)) : null;
       const meter = (arr && arr.attributes && arr.attributes.meter) || "";
       return {
+        pcoId: it.id,
         title: (song && song.attributes.title) || it.attributes.title || "Untitled",
         bpm, meter,
         key: it.attributes.key_name || "",
@@ -996,6 +1001,91 @@ async function fetchSetlist(stId, planId, planLabel) {
       };
     });
   return { name: planLabel, songs };
+}
+
+/* ---------------- saved sets (kept on the device, work offline) ---------------- */
+let library = [];                              // newest first; the open set is always in here
+const LIB_MAX = 40;
+const songKey = (s) => s.pcoId || String(s.title).toLowerCase();
+
+function saveSet() {
+  const set = state.set;
+  store.set("setCache", set);
+  if (!set || set.demo) return;
+  if (!set.id) set.id = set.src ? "pco:" + set.src.planId : "manual:" + Date.now();
+  library = [set, ...library.filter((x) => x.id !== set.id)].slice(0, LIB_MAX);
+  store.set("sets", library);
+}
+
+// Make `set` the open set. keepCurrent: stay on the same song if it's still in there.
+function useSet(set, keepCurrent = false) {
+  const prev = state.set && state.set.songs[state.songIx];
+  const ix = keepCurrent && prev ? set.songs.findIndex((x) => songKey(x) === songKey(prev)) : -1;
+  state.set = set; state.songIx = ix;
+  saveSet(); updateSetPill(); buildCarousel();
+  if (ix >= 0) { updateNextBtn(); scrollToCard(ix, false); store.set("songIx", ix); }
+  else loadSong(0, { instant: true, silent: true });
+}
+
+// Planning Center decides which songs are in the set and their order;
+// your per-song changes (tempo, meter, feel, count, accents) stay on songs still there.
+function mergePco(saved, fresh) {
+  const mine = new Map(saved.songs.map((x) => [songKey(x), x]));
+  const freshKeys = new Set(fresh.songs.map(songKey));
+  const songs = fresh.songs.map((f) => mine.has(songKey(f)) ? { ...mine.get(songKey(f)), pcoId: f.pcoId } : f);
+  const added = fresh.songs.filter((f) => !mine.has(songKey(f))).map((x) => x.title);
+  const removed = saved.songs.filter((x) => !freshKeys.has(songKey(x))).map((x) => x.title);
+  const keptOld = saved.songs.map(songKey).filter((k) => freshKeys.has(k));
+  const keptNew = fresh.songs.map(songKey).filter((k) => mine.has(k));
+  const lines = [];
+  if (added.length) lines.push("Added: " + added.join(", "));
+  if (removed.length) lines.push("Removed: " + removed.join(", "));
+  if (keptOld.some((k, i) => k !== keptNew[i])) lines.push("The song order changed");
+  return { set: { ...saved, name: fresh.name, songs }, changes: lines.join("\n") };
+}
+const confirmPcoChanges = (changes) => confirm(
+  "Planning Center has changed this set since you last used it:\n\n" + changes +
+  "\n\nUpdate your copy? Your tempo and feel changes stay on songs that are still in the set.");
+
+// Quietly check Planning Center for changes to an open saved set. Offline: keep the saved copy.
+async function syncPco(set) {
+  if (!set || !set.src || !apiBase()) return;
+  let fresh;
+  try { fresh = await fetchSetlist(set.src.stId, set.src.planId, set.src.label); } catch (e) { return; }
+  if (state.set !== set || !fresh.songs.length) return;   // user moved on meanwhile
+  const r = mergePco(set, fresh);
+  if (r.changes && confirmPcoChanges(r.changes)) {
+    useSet(r.set, true);
+    if ($("#setSheet").classList.contains("show")) viewHome();
+  }
+}
+
+function viewSets() {
+  setNav.push("home");
+  const cur = state.set && state.set.id;
+  const rows = library.map((x) => `<div class="rowbtn setrow${x.id === cur ? " current" : ""}" data-id="${escapeHtml(x.id)}" role="button" tabindex="0">
+      <div class="rt"><div class="a">${escapeHtml(x.name)}</div>
+        <div class="b">${x.songs.length} songs · ${x.src ? "Planning Center" : "Custom"}</div></div>
+      ${x.id === cur ? `<span class="nowtag">Open</span>`
+        : `<button class="ebtn del" data-del="1" aria-label="Delete saved set">&#10005;</button>`}
+    </div>`).join("");
+  setView((rows || `<div class="notice" style="margin-top:6px">Sets you load are saved here, with your changes, so they work offline.</div>`) + `
+    <button class="primary" id="loadPcoBtn" style="margin-top:8px">From Planning Center</button>
+    <button class="secondary" id="manualBtn">New set</button>`, "My sets", true);
+  $("#loadPcoBtn").addEventListener("click", goServiceTypes);
+  $("#manualBtn").addEventListener("click", viewManual);
+  $$("#setBody .setrow").forEach((r) => r.addEventListener("click", (e) => {
+    const set = library.find((x) => x.id === r.dataset.id);
+    if (!set) return;
+    if (e.target.closest("[data-del]")) {
+      if (!confirm(`Delete your saved copy of "${set.name}"?`)) return;
+      library = library.filter((x) => x !== set); store.set("sets", library);
+      setNav.pop(); viewSets();
+      return;
+    }
+    if (set.id !== cur) { useSet(set); toast(`Opened ${set.name}`); syncPco(set); }
+    editingSet = false; viewHome();
+  }));
 }
 
 /* ---------------- set sheet (wizard) ---------------- */
@@ -1014,8 +1104,9 @@ function viewHome() {
   setNav.length = 0;
   let html = "";
   if (state.set && state.set.songs.length) {
+    const reset = state.set.src && !editingSet ? `<button class="linkbtn dim" id="resetBtn">Reset</button>` : "";
     const head = `<div class="sethead"><span class="name">${escapeHtml(state.set.name)}</span>
-      <button class="linkbtn" id="editSetBtn">${editingSet ? "Done" : "Edit"}</button></div>`;
+      <span class="headbtns">${reset}<button class="linkbtn" id="editSetBtn">${editingSet ? "Done" : "Edit"}</button></span></div>`;
     if (editingSet) {
       setView(head + state.set.songs.map(editRow).join("") + `
         <div class="field" style="margin-top:16px">
@@ -1031,26 +1122,25 @@ function viewHome() {
     if (state.set.demo) {
       html += `<div class="notice" style="margin-top:6px">This is a <b>demo set</b> so you can feel the app. Load your real set and the titles, BPMs, and meters come straight from <b>Planning Center</b>.</div>`;
       html += head + state.set.songs.map((s, i) => songRow(s, i)).join("");
-      html += `<button class="primary" id="loadPcoBtn" style="margin-top:8px">Load my set from Planning Center</button>`;
+      html += `<button class="primary" id="switchBtn" style="margin-top:8px">Load your set</button>`;
     } else {
       html += head + state.set.songs.map((s, i) => songRow(s, i)).join("");
-      if (state.set.src)
-        html += `<button class="secondary" id="reimportBtn">Re-import this set — discard my changes</button>`;
-      html += `<button class="secondary" id="loadPcoBtn">Load a different set from Planning Center</button>`;
+      html += `<button class="secondary" id="switchBtn">Switch set</button>`;
     }
   } else {
     html += `<div class="notice" style="margin-top:6px">Pull this week's set straight from <b>Planning Center Services</b> — song titles, BPMs, and meters come from each song's arrangement.</div>`;
-    html += `<button class="primary" id="loadPcoBtn">Load from Planning Center</button>`;
+    html += `<button class="primary" id="switchBtn">Load a set</button>`;
   }
-  html += `<button class="secondary" id="manualBtn">Type or paste a set manually</button>`;
   setView(html, state.set ? "Your set" : "Load a set", false);
   const eb = $("#editSetBtn");
   if (eb) eb.addEventListener("click", () => { editingSet = true; viewHome(); });
-  $("#loadPcoBtn").addEventListener("click", goServiceTypes);
-  $("#manualBtn").addEventListener("click", viewManual);
-  const ri = $("#reimportBtn");
-  if (ri) ri.addEventListener("click", () =>
-    goSetlist(state.set.src.stId, state.set.src.planId, state.set.src.label));
+  $("#switchBtn").addEventListener("click", viewSets);
+  const rb = $("#resetBtn");
+  if (rb) rb.addEventListener("click", () => {
+    if (!confirm("Reset this set to what's in Planning Center?\n\nYour changes to it will be lost.")) return;
+    const src = state.set.src;
+    goSetlist(src.stId, src.planId, src.label, true);
+  });
   $$("#setBody .rowbtn[data-ix]").forEach((b) =>
     b.addEventListener("click", () => { loadSong(+b.dataset.ix); closeSheets(); }));
 }
@@ -1108,7 +1198,7 @@ function editSet(mutate) {
   const lost = ix < 0;
   if (lost) ix = Math.min(state.songIx, songs.length - 1);
   state.songIx = ix;
-  store.set("setCache", state.set);
+  saveSet();
   updateSetPill(); buildCarousel();
   if (lost) loadSong(ix, { instant: true, silent: true });
   else { updateNextBtn(); scrollToCard(ix, false); store.set("songIx", ix); }
@@ -1121,7 +1211,7 @@ async function goServiceTypes() {
     toast("Add your Planning Center Relay URL in Settings first");
     return;
   }
-  setNav.push("home");
+  setNav.push("sets");
   showLoading("Finding your service types…");
   try {
     const types = await fetchServiceTypes();
@@ -1152,20 +1242,24 @@ async function goPlans(stId, stName) {
   } catch (e) { failView(e); }
 }
 
-async function goSetlist(stId, planId, label) {
+async function goSetlist(stId, planId, label, reset = false) {
   setNav.push("plans");
   showLoading("Grabbing songs and BPMs…");
   try {
-    const set = await fetchSetlist(stId, planId, label);
-    if (!set.songs.length) { setView(`<div class="notice">This plan has no song items yet.</div>`, label, true); return; }
-    set.src = { stId, planId, label };
-    state.set = set; state.songIx = -1;
-    store.set("setCache", set);
-    updateSetPill();
-    buildCarousel();
-    loadSong(0, { instant: true, silent: true });
-    viewHome();
-    toast(`Loaded ${set.songs.length} songs from ${label}`);
+    const fresh = await fetchSetlist(stId, planId, label);
+    if (!fresh.songs.length) { setView(`<div class="notice">This plan has no song items yet.</div>`, label, true); return; }
+    fresh.src = { stId, planId, label };
+    fresh.id = "pco:" + planId;
+    const saved = !reset && library.find((x) => x.id === fresh.id);
+    let set = fresh;
+    if (saved) {
+      const r = mergePco(saved, fresh);
+      set = !r.changes || confirmPcoChanges(r.changes) ? r.set : saved;
+    }
+    useSet(set, state.set && state.set.id === fresh.id);
+    editingSet = false; viewHome();
+    toast(reset ? "Reset to Planning Center" : saved ? `Opened ${label} with your changes`
+                : `Loaded ${set.songs.length} songs from ${label}`);
   } catch (e) { failView(e); }
 }
 
@@ -1176,21 +1270,19 @@ function failView(e) {
 }
 
 function viewManual() {
-  setNav.push("home");
+  setNav.push("sets");
   setView(`
     <div class="field" style="margin-top:4px">
       <label>One song per line</label>
       <textarea id="manualTxt" placeholder="Goodness of God 126 4/4&#10;King of Kings 132&#10;Build My Life 72 6/8"></textarea>
       <div class="hint">Format: title, then BPM, then meter (optional).</div>
     </div>
-    <button class="primary" id="manualGo">Use this set</button>`, "Manual set", true);
+    <button class="primary" id="manualGo">Create set</button>`, "New set", true);
   $("#manualGo").addEventListener("click", () => {
     const songs = parseManual($("#manualTxt").value);
     if (!songs.length) { toast("Couldn't find any \"title + BPM\" lines"); return; }
-    state.set = { name: "Manual set", songs }; state.songIx = -1;
-    store.set("setCache", state.set);
-    updateSetPill(); buildCarousel();
-    loadSong(0, { instant: true, silent: true });
+    const day = new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    useSet({ id: "manual:" + Date.now(), name: "New set · " + day, songs });
     viewHome();
   });
 }
@@ -1442,6 +1534,7 @@ function wire() {
   $("#setBack").addEventListener("click", () => {
     const prev = setNav.pop();
     if (!prev || prev === "home") viewHome();
+    else if (prev === "sets") viewSets();
     else if (prev === "types") { setNav.pop(); goServiceTypes(); }
     else if (prev === "plans") { setNav.pop(); setNav.pop(); goServiceTypes(); }
   });
@@ -1492,9 +1585,10 @@ async function init() {
   wire();
   buildLamps(); syncSigSelect(); setBpm(120); updateTransport();
 
-  const [settings, creds, setCache, songIx] = await Promise.all([
-    store.get("settings"), store.get("creds"), store.get("setCache"), store.get("songIx"),
+  const [settings, creds, setCache, songIx, sets] = await Promise.all([
+    store.get("settings"), store.get("creds"), store.get("setCache"), store.get("songIx"), store.get("sets"),
   ]);
+  if (Array.isArray(sets)) library = sets;
   if (creds) state.creds = Object.assign(state.creds, creds);
   if (settings) {
     state.sound = settings.sound === "wood" ? "stick" : (settings.sound || state.sound);
@@ -1509,11 +1603,13 @@ async function init() {
     : JSON.parse(JSON.stringify(DEMO_SET));
   state.set = cached;
   if (!setCache) store.set("setCache", cached);
+  else saveSet();                              // older installs: give the set an id + add it to the library
   updateSetPill();
   buildCarousel();
   const ix = Number.isInteger(songIx) ? Math.max(0, Math.min(songIx, cached.songs.length - 1)) : 0;
   loadSong(ix, { instant: true, silent: true });
   reflectSettings(); applyVolume();
+  syncPco(state.set);                          // pick up Planning Center changes if online
   if ("serviceWorker" in navigator && location.protocol.startsWith("http"))
     navigator.serviceWorker.register("sw.js").catch(() => {});   // offline support
   window.addEventListener("pagehide", persistSettings);
