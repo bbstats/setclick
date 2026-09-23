@@ -563,7 +563,7 @@ const $$ = (s) => Array.from(document.querySelectorAll(s));
 const state = {
   bpm: 120, beats: 4, denom: 4, subdiv: 1,
   accents: [2, 1, 1, 1],          // 2 accent, 1 normal, 0 mute
-  sound: "stick", vol: 0.8, muted: false,   // mute is never persisted
+  sound: "click", vol: 0.8, muted: false,   // mute is never persisted
   weak: 0.5,                       // per song: weak-beat volume (1 = same as accents)
   accentPitch: false,              // accents/subdivisions change pitch, not just volume
   dotted: false,                   // "6/8 in 2": BPM counts dotted quarters, not eighths
@@ -1088,7 +1088,8 @@ async function fetchSetlist(stId, planId, planLabel) {
 /* ---------------- saved sets (kept on the device, work offline) ---------------- */
 let library = [];                              // newest first; the open set is always in here
 const LIB_MAX = 40;
-const songKey = (s) => s.pcoId || String(s.title).toLowerCase();
+const sameSong = (a, b) => a.pcoId && b.pcoId ? a.pcoId === b.pcoId
+  : String(a.title).toLowerCase() === String(b.title).toLowerCase();
 
 function saveSet() {
   const set = state.set;
@@ -1102,7 +1103,7 @@ function saveSet() {
 // Make `set` the open set. keepCurrent: stay on the same song if it's still in there.
 function useSet(set, keepCurrent = false) {
   const prev = state.set && state.set.songs[state.songIx];
-  const ix = keepCurrent && prev ? set.songs.findIndex((x) => songKey(x) === songKey(prev)) : -1;
+  const ix = keepCurrent && prev ? set.songs.findIndex((x) => sameSong(x, prev)) : -1;
   state.set = set; state.songIx = ix;
   saveSet(); updateSetPill(); buildCarousel();
   if (ix >= 0) { updateNextBtn(); scrollToCard(ix, false); store.set("songIx", ix); }
@@ -1112,17 +1113,26 @@ function useSet(set, keepCurrent = false) {
 // Planning Center decides which songs are in the set and their order;
 // your per-song changes (tempo, meter, feel, count, accents) stay on songs still there.
 function mergePco(saved, fresh) {
-  const mine = new Map(saved.songs.map((x) => [songKey(x), x]));
-  const freshKeys = new Set(fresh.songs.map(songKey));
-  const songs = fresh.songs.map((f) => mine.has(songKey(f)) ? { ...mine.get(songKey(f)), pcoId: f.pcoId } : f);
-  const added = fresh.songs.filter((f) => !mine.has(songKey(f))).map((x) => x.title);
-  const removed = saved.songs.filter((x) => !freshKeys.has(songKey(x))).map((x) => x.title);
-  const keptOld = saved.songs.map(songKey).filter((k) => freshKeys.has(k));
-  const keptNew = fresh.songs.map(songKey).filter((k) => mine.has(k));
+  // Pair each fresh song with a saved one: same plan item first, then same title
+  // (saves from before item ids were kept, or an item Planning Center re-created).
+  const left = new Set(saved.songs), pair = new Map();
+  const title = (x) => String(x.title).toLowerCase();
+  const take = (test) => fresh.songs.forEach((f) => {
+    if (pair.has(f)) return;
+    const s = [...left].find((s) => test(s, f));
+    if (s) { pair.set(f, s); left.delete(s); }
+  });
+  take((s, f) => s.pcoId && s.pcoId === f.pcoId);
+  take((s, f) => title(s) === title(f));
+  const songs = fresh.songs.map((f) => pair.has(f) ? { ...pair.get(f), pcoId: f.pcoId } : f);
+  const added = fresh.songs.filter((f) => !pair.has(f)).map((x) => x.title);
+  const removed = [...left].map((x) => x.title);
+  const keptOld = saved.songs.filter((x) => !left.has(x));
+  const keptNew = fresh.songs.filter((f) => pair.has(f)).map((f) => pair.get(f));
   const lines = [];
   if (added.length) lines.push("Added: " + added.join(", "));
   if (removed.length) lines.push("Removed: " + removed.join(", "));
-  if (keptOld.some((k, i) => k !== keptNew[i])) lines.push("The song order changed");
+  if (keptOld.some((x, i) => x !== keptNew[i])) lines.push("The song order changed");
   return { set: { ...saved, name: fresh.name, songs }, changes: lines.join("\n") };
 }
 const confirmPcoChanges = (changes) => confirm(
@@ -1136,7 +1146,10 @@ async function syncPco(set) {
   try { fresh = await fetchSetlist(set.src.stId, set.src.planId, set.src.label); } catch (e) { return; }
   if (state.set !== set || !fresh.songs.length) return;   // user moved on meanwhile
   const r = mergePco(set, fresh);
-  if (r.changes && confirmPcoChanges(r.changes)) {
+  if (!r.changes) {                                       // same set; pick up item ids older saves lack
+    r.set.songs.forEach((x, i) => { set.songs[i].pcoId = x.pcoId; });
+    saveSet();
+  } else if (confirmPcoChanges(r.changes)) {
     useSet(r.set, true);
     if ($("#setSheet").classList.contains("show")) viewHome();
   }
@@ -1781,7 +1794,7 @@ async function init() {
   if (Array.isArray(sets)) library = sets;
   if (creds) state.creds = Object.assign(state.creds, creds);
   if (settings) {
-    state.sound = settings.sound === "wood" ? "stick" : (settings.sound || state.sound);
+    state.sound = settings.sound || state.sound;
     if (settings.vol > 0) state.vol = settings.vol;   // never boot silent: a saved 0 falls back to default
     state.wake = settings.wake ?? state.wake;
     state.flash = settings.flash ?? state.flash;

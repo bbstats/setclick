@@ -101,6 +101,28 @@ test("Planning Center changes: confirm first, cancel keeps your copy, OK merges 
   expect(await page.evaluate(() => state.set.songs[state.songIx].title)).toBe("King of Kings");   // stayed on it
 });
 
+test("sets saved before plan item ids existed match by title, with no false changes", async ({ page }) => {
+  const dialogs = [];
+  page.on("dialog", (d) => { dialogs.push(d.message()); d.dismiss(); });
+  await mockPco(page, PLAN);
+  await page.evaluate(async (plan) => {
+    const old = { name: "Sep 28", src: { stId: "st1", planId: "p1", label: "Sep 28" },
+      songs: plan.map(([, title, bpm, meter]) => ({ title, bpm: title === "King of Kings" ? 140 : bpm, meter, key: "G", subdiv: 1, countIn: 1 })) };
+    useSet(old);
+    loadSong(1, { instant: true });
+    await syncPco(state.set);
+  }, PLAN);
+  expect(dialogs).toEqual([]);
+  expect(await titles(page)).toEqual(["Goodness of God@126", "King of Kings@140", "Build My Life@69"]);
+  expect(await page.evaluate(() => state.set.songs.map((s) => s.pcoId))).toEqual(["1", "2", "3"]);
+
+  await page.evaluate(() => { __items = [["2", "King of Kings", 136, "4/4"], ["1", "Goodness of God", 126, "4/4"]]; });
+  await page.evaluate(() => goSetlist("st1", "p1", "Sep 28"));
+  expect(dialogs.at(-1)).toBe("Planning Center has changed this set since you last used it:\n\n" +
+    "Removed: Build My Life\nThe song order changed" +
+    "\n\nUpdate your copy? Your tempo and feel changes stay on songs that are still in the set.");
+});
+
 test("Reset asks first, then restores Planning Center values; survives reload", async ({ page }) => {
   const dialogs = []; let answer = false;
   page.on("dialog", (d) => { dialogs.push(d.message()); answer ? d.accept() : d.dismiss(); });
