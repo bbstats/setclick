@@ -14,6 +14,16 @@ test("manual entry parsing", async ({ page }) => {
     ["No Tempo Song", null, ""],
     ["Build My Life", 72, ""],
   ]);
+  const odd = await page.evaluate(() => parseManual("24/7 Praise 110 3/4\nOpen 24/7 96"));
+  expect(odd.map((s) => [s.title, s.bpm, s.meter])).toEqual([["24/7 Praise", 110, "3/4"], ["Open 24/7", 96, ""]]);
+});
+
+test("a song with no meter gets 4/4, not the previous song's meter and accents", async ({ page }) => {
+  await page.evaluate(() => { useSet({ id: "manual:t", name: "T", songs: parseManual("Waltz 90 3/4\nNo Meter 100") }); });
+  await page.locator(".lamp").nth(1).click();                 // custom accents on the 3/4 song
+  await page.evaluate(() => loadSong(1, { instant: true }));
+  expect(await page.evaluate(() => [state.beats, state.denom, state.accents])).toEqual([4, 4, [2, 1, 1, 1]]);
+  expect(await page.inputValue("#sigSel")).toBe("4/4");
 });
 
 test("edit set: reorder, add, remove the current song", async ({ page }) => {
@@ -139,4 +149,80 @@ test("Reset asks first, then restores Planning Center values; survives reload", 
   await open(page);
   expect(await titles(page)).toEqual(["Goodness of God@126", "King of Kings@136", "Build My Life@69"]);
   expect(await page.evaluate(() => library.map((s) => s.id))).toEqual(["pco:p1"]);
+});
+
+test("Reset also resets the tempo that's playing, not just the saved one", async ({ page }) => {
+  page.on("dialog", (d) => d.accept());
+  await mockPco(page, PLAN);
+  await loadPlan(page);
+  await page.evaluate(() => { loadSong(1, { instant: true }); setBpm(140); viewHome(); });
+  await page.click("#resetBtn");
+  await page.waitForFunction(() => state.set.songs[1].bpm === 136);
+  expect(await page.evaluate(() => state.bpm)).toBe(136);
+  await expect(page.locator("#bpmNum")).toHaveText("136");
+});
+
+test("Planning Center's new tempo, meter and title come through unless you changed that song", async ({ page }) => {
+  const dialogs = [];
+  page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); });
+  await mockPco(page, PLAN);
+  await loadPlan(page);
+  await page.evaluate(() => { loadSong(1, { instant: true }); setBpm(140); });   // your King of Kings tempo
+  await page.evaluate(() => { __items = [["1", "Goodness of God", 130, "4/4"], ["2", "King of Kings", 150, "4/4"],
+                                         ["3", "Build My Life (Live)", 69, "6/8"]]; });
+  await page.evaluate(() => goSetlist("st1", "p1", "Sep 28"));
+  expect(dialogs).toHaveLength(1);
+  expect(dialogs[0]).toContain("New tempo or meter: Goodness of God, Build My Life (Live)");
+  expect(dialogs[0]).not.toContain("Added");
+  expect(await titles(page)).toEqual(["Goodness of God@130", "King of Kings@140", "Build My Life (Live)@69"]);
+  expect(await page.evaluate(() => state.set.songs[2].meter)).toBe("6/8");
+});
+
+test("a Planning Center prompt waits until STOP instead of freezing the click", async ({ page }) => {
+  const dialogs = [];
+  page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); });
+  await mockPco(page, PLAN);
+  await loadPlan(page);
+  await page.evaluate(() => closeSheets());
+  await page.click("#playBtn");
+  await page.waitForFunction(() => state.playing);
+  await page.evaluate(() => { __items = [...__items, ["9", "Way Maker", 68, "6/8"]]; });
+  await page.evaluate(() => syncPco(state.set));
+  await page.waitForTimeout(300);
+  expect(dialogs).toEqual([]);
+  expect(await page.evaluate(() => state.playing)).toBe(true);
+  await page.click("#playBtn");
+  await expect.poll(() => dialogs.length).toBe(1);
+  expect(dialogs[0]).toContain("Added: Way Maker");
+  expect(await titles(page)).toContain("Way Maker@68");
+});
+
+test("pressing Back while a list loads throws the late result away", async ({ page }) => {
+  await mockPco(page, PLAN);
+  await page.click("#setPill");
+  await page.click("#switchBtn");
+  await page.click("#loadPcoBtn");
+  await page.evaluate(() => { window.__delay = 600; });
+  await page.click("[data-st=st1]");                             // plans start loading, slowly…
+  await page.evaluate(() => { window.__delay = 0; });
+  await page.click("#setBack");                                  // …but we go back to the services
+  await expect(page.locator("[data-st=st1]")).toBeVisible();
+  await page.waitForTimeout(800);                                // the plans answer arrives now
+  await expect(page.locator("#setSheetTitle")).toHaveText("Pick a service");
+  await page.click("#setBack");
+  await expect(page.locator("#setSheetTitle")).toHaveText("My sets");
+});
+
+test("Back from a plan that failed to load returns to the plan list", async ({ page }) => {
+  await mockPco(page, PLAN);
+  await page.evaluate(() => { window.__fail = "/items"; });
+  await page.click("#setPill");
+  await page.click("#switchBtn");
+  await page.click("#loadPcoBtn");
+  await page.click("[data-st=st1]");
+  await page.click("[data-plan=p1]");
+  await expect(page.locator("#setSheetTitle")).toHaveText("Hmm");
+  await page.click("#setBack");
+  await expect(page.locator("[data-plan=p1]")).toBeVisible();
+  await expect(page.locator("#setSheetTitle")).toHaveText("Sunday AM");
 });

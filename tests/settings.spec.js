@@ -59,3 +59,20 @@ test("Escape and a downward swipe close sheets", async ({ page }) => {
   await page.mouse.up();
   expect(await shown(page, "setSheet")).toBe(false);
 });
+
+test("a relay URL typed without https:// still works", async ({ page }) => {
+  expect(await page.evaluate(() => { state.creds.relay = " my-relay.workers.dev/ "; return apiBase(); }))
+    .toBe("https://my-relay.workers.dev");
+});
+
+test("a relay that answers with the wrong thing gets a plain-English error", async ({ page }) => {
+  let reply = { status: 200, body: "<html>Not a relay</html>" };
+  await page.route("https://relay.test/**", (r) => r.fulfill({ ...reply, headers: { "Access-Control-Allow-Origin": "*" } }));
+  await page.click("#settingsBtn");
+  await page.fill("#pcoRelay", "https://relay.test");
+  await page.click("#testBtn");
+  await expect(page.locator("#connStatus")).toHaveText(/not with Planning Center data/);
+  reply = { status: 401, body: "{}" };
+  await page.click("#testBtn");
+  await expect(page.locator("#connStatus")).toHaveText(/turned down the relay's credentials/);
+});

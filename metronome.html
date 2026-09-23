@@ -166,6 +166,7 @@ input[type=range]::-webkit-slider-thumb{
 .chip.tap:active{border-color:var(--amber); color:var(--amber);}
 .sndgrid{display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;}
 .sndgrid .chip{height:48px; font-size:13px; padding:0 4px;}
+.sndgrid .chip.on{border-color:var(--amber); color:var(--amber);}
 .chip.count{flex-direction:column; gap:2px; line-height:1; font-size:13px;}
 .chip.count .eyebrow{font-size:9px; letter-spacing:.14em; color:var(--faint); font-weight:800;}
 .chip.count.off #cntVal{color:var(--dim);}
@@ -782,7 +783,7 @@ function beatDur() {                           // seconds per lamp (eighth note 
 }
 
 function countStep() {                        // bar-1 pulse spacing for 2-bar counts
-  if (state.denom === 8 && state.beats % 3 === 0) return 3;  // 6/8, 9/8, 12/8: dotted pulses
+  if (isCompound()) return 3;                                // 6/8, 9/8, 12/8: dotted pulses
   if (state.beats % 2 === 0) return 2;                       // 4/4, 2/4, 6/4: half-bar pulses
   return 1;                                                  // odd meters: count every beat
 }
@@ -801,7 +802,7 @@ function scheduler() {
         const n = bInBar / step + 1;
         clickAt(nextT, bInBar === 0 ? 2 : 1);
         speakAt(nextT, n, bInBar === 0, beatDur() * step);
-        visQ.push({ t: nextT, b: bInBar, count: n });
+        queueLamp({ t: nextT, b: bInBar, count: n });
       }
       nextT += beatDur();
       countPos++;
@@ -811,7 +812,7 @@ function scheduler() {
     if (sub === 0) {
       const acc = state.accents[beat] ?? 1;
       if (acc > 0) clickAt(nextT, acc);
-      visQ.push({ t: nextT, b: beat });
+      queueLamp({ t: nextT, b: beat });
     } else if (state.subdiv > 1) {
       clickAt(nextT, 0);
     }
@@ -821,17 +822,30 @@ function scheduler() {
   }
 }
 
+// Beats waiting to be drawn. Capped: in a background tab the scheduler keeps
+// running but animation frames don't, so the queue would grow without limit.
+function queueLamp(e) {
+  if (visQ.length >= 32) visQ.shift();
+  visQ.push(e);
+}
+
+let drawRaf = 0;
 function drawLoop() {
   if (!state.playing) return;
   const now = ctx.currentTime;
-  while (visQ.length && visQ[0].t <= now + 0.004) paintBeat(visQ.shift());
-  requestAnimationFrame(drawLoop);
+  let due = null;
+  while (visQ.length && visQ[0].t <= now + 0.004) due = visQ.shift();
+  if (due) paintBeat(due);                   // only the latest beat is worth drawing
+  drawRaf = requestAnimationFrame(drawLoop);
+}
+
+function clearLamps() {
+  $$(".lamp").forEach((l) => l.classList.remove("on", "down"));
 }
 
 function paintBeat(e) {
-  const lamps = $$(".lamp");
-  lamps.forEach((l) => l.classList.remove("on", "down"));
-  const l = lamps[e.b];
+  clearLamps();
+  const l = $$(".lamp")[e.b];
   if (l) { l.classList.add("on"); if (e.b === 0) l.classList.add("down"); }
   const num = $("#bpmNum");
   if (e.count) {
@@ -871,36 +885,49 @@ function resetTake(lead) {                    // start from the top: count-in if
 function relaunch() {
   newBus();
   resetTake(0.25);
-  $$(".lamp").forEach((l) => l.classList.remove("on", "down"));
+  clearLamps();
   scheduler();
 }
 
 async function start() {
   if (starting || state.playing) return;      // double-tap would leak a second interval
   starting = true;
-  initAudio();
-  try { await ctx.resume(); } catch (e) {}
-  try { await silentEl.play(); } catch (e) {}   // playback session: bypasses mute switch
-  starting = false;
+  try {
+    initAudio();
+    // Both called inside the tap itself: iOS only honors them during the gesture.
+    // The silent <audio> puts iOS in a playback session, which bypasses the mute switch.
+    const quietly = (fn) => new Promise((ok) => ok(fn())).catch(() => {});   // runs fn now, ignores failure
+    await Promise.all([quietly(() => ctx.resume()), quietly(() => silentEl.play())]);
+  } catch (e) {
+    toast("Couldn't start audio on this device");
+    return;
+  } finally {
+    starting = false;
+  }
   resetTake(state.countIn > 0 ? 0.2 : 0.12);
   scheduler();
   timer = setInterval(scheduler, TICK_MS);
   state.playing = true;
   requestWake();
   updateTransport();
-  requestAnimationFrame(drawLoop);
+  drawRaf = requestAnimationFrame(drawLoop);
 }
 
 function stop() {
   if (timer) clearInterval(timer);
+  cancelAnimationFrame(drawRaf);
   timer = null; state.playing = false; visQ.length = 0; phase = "run";
   if (ctx) newBus();                          // cut clicks already queued, so STOP is instant
   try { silentEl && silentEl.pause(); } catch (e) {}
-  $$(".lamp").forEach((l) => l.classList.remove("on", "down"));
+  clearLamps();
   const num = $("#bpmNum");
   num.classList.remove("count"); num.textContent = state.bpm;
   releaseWake();
   updateTransport();
+  if (pendingSync) {                          // a Planning Center prompt waited for the song to end
+    const run = pendingSync; pendingSync = null;
+    setTimeout(run, 50);                      // let STOP paint before the dialog blocks
+  }
 }
 
 function toggle() { state.playing ? stop() : start(); }
@@ -909,9 +936,16 @@ function toggle() { state.playing ? stop() : start(); }
 let wl = null;
 async function requestWake() {
   if (!state.wake || !("wakeLock" in navigator)) return;
-  try { wl = await navigator.wakeLock.request("screen"); } catch (e) {}
+  try {
+    const lock = await navigator.wakeLock.request("screen");
+    if (state.playing && state.wake) { releaseWake(); wl = lock; }
+    else lock.release().catch(() => {});      // stopped while we waited
+  } catch (e) {}
 }
-function releaseWake() { try { wl && wl.release(); } catch (e) {} wl = null; }
+function releaseWake() {
+  if (wl) wl.release().catch(() => {});
+  wl = null;
+}
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     if (state.playing) requestWake();
@@ -926,13 +960,17 @@ function saveSongProp(patch) {
   saveSet();
 }
 
+const MIN_BPM = 30, MAX_BPM = 280;             // matches the tempo slider
+const clampBpm = (v) => Math.max(MIN_BPM, Math.min(MAX_BPM, Math.round(v)));
+
 function setBpm(v, fromSlider) {
-  v = Math.max(30, Math.min(280, Math.round(v)));
+  v = clampBpm(v);
   state.bpm = v;
-  $("#bpmNum").textContent = v;
+  const num = $("#bpmNum");
+  if (!num.classList.contains("count")) num.textContent = v;   // the count-in owns the display
   const sl = $("#slider");
   if (!fromSlider) sl.value = v;
-  sl.style.setProperty("--fill", (((v - 30) / 250) * 100).toFixed(1) + "%");
+  sl.style.setProperty("--fill", (((v - MIN_BPM) / (MAX_BPM - MIN_BPM)) * 100).toFixed(1) + "%");
   if (state.set && state.songIx >= 0) {          // remember nudges for this gig
     state.set.songs[state.songIx].bpm = v;
     saveSet();
@@ -958,22 +996,32 @@ function holdRepeat(el, fn) {
   let t1 = null, t2 = null;
   const clear = () => { clearTimeout(t1); clearInterval(t2); t1 = t2 = null; };
   el.addEventListener("pointerdown", (ev) => {
-    ev.preventDefault(); fn();
+    if (ev.button > 0) return;
+    ev.preventDefault();
+    clear();                                    // a second finger would orphan the first repeat
+    fn();
     t1 = setTimeout(() => { t2 = setInterval(fn, 60); }, 480);
   });
   ["pointerup", "pointercancel", "pointerleave"].forEach((e) => el.addEventListener(e, clear));
 }
 
 /* ---------------- meter / lamps ---------------- */
-function applyMeter(m) {
+// "6/8", "6/8 in 2" -> { beats, denom, inPulses }, or null if the app can't play it.
+function parseMeter(m) {
   const mm = /^(\d{1,2})\s*\/\s*(\d{1,2})(\s+in\s+\d+)?$/i.exec(String(m || "").trim());
-  if (!mm) return false;
-  const b = +mm[1], d = +mm[2];
-  if (b < 1 || b > 16 || ![2, 4, 8, 16].includes(d)) return false;
-  state.beats = b; state.denom = d;
-  state.dotted = !!mm[3] && isCompound();
-  state.accents = Array.from({ length: b }, (_, i) =>
-    i === 0 ? 2 : (d === 8 && b % 3 === 0 && i % 3 === 0 ? 2 : 1));
+  if (!mm) return null;
+  const beats = +mm[1], denom = +mm[2];
+  if (beats < 1 || beats > 16 || ![2, 4, 8, 16].includes(denom)) return null;
+  return { beats, denom, inPulses: !!mm[3] };
+}
+
+function applyMeter(m) {
+  const p = parseMeter(m);
+  if (!p) return false;
+  state.beats = p.beats; state.denom = p.denom;
+  state.dotted = p.inPulses && isCompound();
+  state.accents = Array.from({ length: p.beats }, (_, i) =>
+    i === 0 || (isCompound() && i % 3 === 0) ? 2 : 1);
   beat = 0; sub = 0;
   buildLamps(); syncSigSelect();
   return true;
@@ -1005,7 +1053,8 @@ function syncSigSelect() {
 
 /* ---------------- Planning Center client ---------------- */
 function apiBase() {
-  return (state.creds.relay || "").trim().replace(/\/+$/, "");
+  const b = (state.creds.relay || "").trim().replace(/\/+$/, "");
+  return !b || /^https?:\/\//i.test(b) ? b : "https://" + b;   // "x.workers.dev" would fetch from this page's own host
 }
 async function pco(path) {
   const base = apiBase();
@@ -1021,8 +1070,11 @@ async function pco(path) {
     clearTimeout(to);
   }
   if (res.status === 500) throw new Error("Relay error: Check that your App ID and Secret are saved as Variables in Cloudflare.");
+  if (res.status === 401 || res.status === 403) throw new Error("AUTH");
   if (!res.ok) throw new Error("Planning Center returned an error (" + res.status + ").");
-  return res.json();
+  const j = await res.json().catch(() => null);
+  if (!j || !Array.isArray(j.data)) throw new Error("BAD_RESPONSE");
+  return j;
 }
 const BLOCKED_MSG =
   "Couldn't reach your relay. Check that the Worker URL is right and the Worker is deployed.";
@@ -1030,6 +1082,8 @@ const ERR_MSGS = {
   BLOCKED: BLOCKED_MSG,
   TIMEOUT: "Planning Center took too long to respond. Check your connection and try again.",
   MISSING_RELAY: "Add your Planning Center Relay URL first.",
+  AUTH: "Planning Center turned down the relay's credentials. Check the App ID and Secret saved in the Worker.",
+  BAD_RESPONSE: "That URL answered, but not with Planning Center data. Check that it's your relay Worker's URL.",
 };
 const errMsg = (e) => ERR_MSGS[e.message] || e.message;
 
@@ -1039,7 +1093,7 @@ function jsonApiMap(included) {
   return m;
 }
 function relRef(map, rel) {
-  const d = rel && rel.data;
+  const d = rel?.data;
   return d ? map.get(d.type + "/" + d.id) : null;
 }
 
@@ -1067,19 +1121,20 @@ async function fetchSetlist(stId, planId, planLabel) {
   const j = await pco(`/services/v2/service_types/${stId}/plans/${planId}/items?include=song,arrangement&per_page=100`);
   const inc = jsonApiMap(j.included);
   const songs = j.data
-    .filter((it) => it.attributes.item_type === "song")
+    .filter((it) => it.attributes?.item_type === "song")
     .map((it) => {
-      const song = relRef(inc, it.relationships && it.relationships.song);
-      const arr = relRef(inc, it.relationships && it.relationships.arrangement);
-      const bpmRaw = arr && arr.attributes ? arr.attributes.bpm : null;
-      const bpm = bpmRaw ? Math.round(Number(bpmRaw)) : null;
-      const meter = (arr && arr.attributes && arr.attributes.meter) || "";
+      const song = relRef(inc, it.relationships?.song)?.attributes;
+      const arr = relRef(inc, it.relationships?.arrangement)?.attributes;
+      const n = Number(arr?.bpm);
+      const bpm = n > 0 ? clampBpm(n) : null;
+      const meter = arr?.meter || "";
       return {
         pcoId: it.id,
-        title: (song && song.attributes.title) || it.attributes.title || "Untitled",
+        title: song?.title || it.attributes.title || "Untitled",
         bpm, meter,
         key: it.attributes.key_name || "",
         subdiv: 1, countIn: 1,
+        pco: { bpm, meter },           // what Planning Center said, to tell your edits from theirs
       };
     });
   return { name: planLabel, songs };
@@ -1090,28 +1145,31 @@ let library = [];                              // newest first; the open set is 
 const LIB_MAX = 40;
 const sameSong = (a, b) => a.pcoId && b.pcoId ? a.pcoId === b.pcoId
   : String(a.title).toLowerCase() === String(b.title).toLowerCase();
+const plural = (n, word) => n + " " + word + (n === 1 ? "" : "s");
 
 function saveSet() {
   const set = state.set;
+  if (set && !set.demo && !set.id) set.id = set.src ? "pco:" + set.src.planId : "manual:" + Date.now();
   store.set("setCache", set);
   if (!set || set.demo) return;
-  if (!set.id) set.id = set.src ? "pco:" + set.src.planId : "manual:" + Date.now();
   library = [set, ...library.filter((x) => x.id !== set.id)].slice(0, LIB_MAX);
   store.set("sets", library);
 }
 
-// Make `set` the open set. keepCurrent: stay on the same song if it's still in there.
+// Make `set` the open set. keepCurrent: stay on the same song if it's still in there
+// (its values are applied again, since they may have changed; no count-in restart).
 function useSet(set, keepCurrent = false) {
   const prev = state.set && state.set.songs[state.songIx];
   const ix = keepCurrent && prev ? set.songs.findIndex((x) => sameSong(x, prev)) : -1;
   state.set = set; state.songIx = ix;
   saveSet(); updateSetPill(); buildCarousel();
-  if (ix >= 0) { updateNextBtn(); scrollToCard(ix, false); store.set("songIx", ix); }
-  else loadSong(0, { instant: true, silent: true });
+  loadSong(Math.max(ix, 0), { instant: true, silent: true });
 }
 
-// Planning Center decides which songs are in the set and their order;
-// your per-song changes (tempo, meter, feel, count, accents) stay on songs still there.
+// Planning Center decides which songs are in the set, their order, titles and keys.
+// Tempo and meter are yours once you change them; until then, Planning Center's
+// updates come through. Your other per-song settings (feel, count, accents) always stay.
+const PCO_OWNED = ["bpm", "meter"];
 function mergePco(saved, fresh) {
   // Pair each fresh song with a saved one: same plan item first, then same title
   // (saves from before item ids were kept, or an item Planning Center re-created).
@@ -1124,7 +1182,16 @@ function mergePco(saved, fresh) {
   });
   take((s, f) => s.pcoId && s.pcoId === f.pcoId);
   take((s, f) => title(s) === title(f));
-  const songs = fresh.songs.map((f) => pair.has(f) ? { ...pair.get(f), pcoId: f.pcoId } : f);
+  const retimed = [];
+  const songs = fresh.songs.map((f) => {
+    const s = pair.get(f);
+    if (!s) return f;
+    const song = { ...s, pcoId: f.pcoId, title: f.title, key: f.key, pco: f.pco };
+    const theirs = PCO_OWNED.filter((k) => s.pco && s[k] === s.pco[k] && f[k] !== s[k]);   // saves without a baseline keep theirs
+    theirs.forEach((k) => { song[k] = f[k]; });
+    if (theirs.length) retimed.push(f.title);
+    return song;
+  });
   const added = fresh.songs.filter((f) => !pair.has(f)).map((x) => x.title);
   const removed = [...left].map((x) => x.title);
   const keptOld = saved.songs.filter((x) => !left.has(x));
@@ -1132,6 +1199,7 @@ function mergePco(saved, fresh) {
   const lines = [];
   if (added.length) lines.push("Added: " + added.join(", "));
   if (removed.length) lines.push("Removed: " + removed.join(", "));
+  if (retimed.length) lines.push("New tempo or meter: " + retimed.join(", "));
   if (keptOld.some((x, i) => x !== keptNew[i])) lines.push("The song order changed");
   return { set: { ...saved, name: fresh.name, songs }, changes: lines.join("\n") };
 }
@@ -1141,41 +1209,55 @@ const confirmPcoChanges = (changes) => confirm(
 
 // Quietly check Planning Center for changes to an open saved set. Offline: keep the saved copy.
 async function syncPco(set) {
-  if (!set || !set.src || !apiBase()) return;
+  if (!set?.src || !apiBase()) return;
   let fresh;
   try { fresh = await fetchSetlist(set.src.stId, set.src.planId, set.src.label); } catch (e) { return; }
+  applyPcoSync(set, fresh);
+}
+
+let pendingSync = null;                        // a Planning Center prompt waiting for STOP
+function applyPcoSync(set, fresh) {
   if (state.set !== set || !fresh.songs.length) return;   // user moved on meanwhile
   const r = mergePco(set, fresh);
-  if (!r.changes) {                                       // same set; pick up item ids older saves lack
-    r.set.songs.forEach((x, i) => { set.songs[i].pcoId = x.pcoId; });
+  if (!r.changes) {                            // same songs: take new ids, titles, keys quietly
+    const shown = (x) => x.title + "\n" + x.key;
+    const redraw = set.songs.some((x, i) => shown(x) !== shown(r.set.songs[i]));
+    set.songs.forEach((x, i) => Object.assign(x, r.set.songs[i]));
     saveSet();
-  } else if (confirmPcoChanges(r.changes)) {
+    if (redraw) { buildCarousel(); updateNextBtn(); scrollToCard(state.songIx, false); }
+    return;
+  }
+  // confirm() freezes the page, and the click with it: never ask mid-song.
+  if (state.playing) { pendingSync = () => applyPcoSync(set, fresh); return; }
+  if (confirmPcoChanges(r.changes)) {
     useSet(r.set, true);
     if ($("#setSheet").classList.contains("show")) viewHome();
   }
 }
 
 function viewSets() {
-  setNav.push("home");
   const cur = state.set && state.set.id;
   const rows = library.map((x) => `<div class="rowbtn setrow${x.id === cur ? " current" : ""}" data-id="${escapeHtml(x.id)}" role="button" tabindex="0">
       <div class="rt"><div class="a">${escapeHtml(x.name)}</div>
-        <div class="b">${x.songs.length} songs · ${x.src ? "Planning Center" : "Custom"}</div></div>
+        <div class="b">${plural(x.songs.length, "song")} · ${x.src ? "Planning Center" : "Custom"}</div></div>
       ${x.id === cur ? `<span class="nowtag">Open</span>`
         : `<button class="ebtn del" data-del="1" aria-label="Delete saved set">&#10005;</button>`}
     </div>`).join("");
   setView((rows || `<div class="notice" style="margin-top:6px">Sets you load are saved here, with your changes, so they work offline.</div>`) + `
     <button class="primary" id="loadPcoBtn" style="margin-top:8px">From Planning Center</button>
-    <button class="secondary" id="manualBtn">New set</button>`, "My sets", true);
-  $("#loadPcoBtn").addEventListener("click", goServiceTypes);
-  $("#manualBtn").addEventListener("click", viewManual);
+    <button class="secondary" id="manualBtn">New set</button>`, "My sets");
+  $("#loadPcoBtn").addEventListener("click", () => {
+    if (!state.creds.relay) openSettings(true);
+    else go(goServiceTypes);
+  });
+  $("#manualBtn").addEventListener("click", () => go(viewManual));
   $$("#setBody .setrow").forEach((r) => r.addEventListener("click", (e) => {
     const set = library.find((x) => x.id === r.dataset.id);
     if (!set) return;
     if (e.target.closest("[data-del]")) {
       if (!confirm(`Delete your saved copy of "${set.name}"?`)) return;
       library = library.filter((x) => x !== set); store.set("sets", library);
-      setNav.pop(); viewSets();
+      viewSets();
       return;
     }
     if (set.id !== cur) { useSet(set); toast(`Opened ${set.name}`); syncPco(set); }
@@ -1184,19 +1266,38 @@ function viewSets() {
 }
 
 /* ---------------- set sheet (wizard) ---------------- */
-const setNav = [];   // stack of view ids
-function setView(html, title, canBack) {
+// Views are functions that render into #setBody. go() opens one and remembers the
+// one it replaced for Back; viewHome() is the root and forgets the history.
+const setNav = [];
+let setCur = null;
+let navSeq = 0;                                // bumped by every render; async views check it
+function go(view) {
+  if (setCur) setNav.push(setCur);
+  setCur = view;
+  return view();
+}
+function back() {
+  setCur = setNav.pop() || viewHome;
+  setCur();
+}
+function setView(html, title) {
+  navSeq++;
   $("#setBody").innerHTML = html;
   $("#setSheetTitle").textContent = title;
-  $("#setBack").style.visibility = canBack ? "visible" : "hidden";
+  $("#setBack").style.visibility = setNav.length ? "visible" : "hidden";
 }
-function showLoading(msg) {
-  setView(`<div class="loading-line"><span class="spin"></span>&nbsp; ${msg}</div>`, "Loading", setNav.length > 0);
+// Spinner, fetch, then render the result, unless the user went somewhere else meanwhile.
+async function loadView(msg, fetchIt, render) {
+  setView(`<div class="loading-line"><span class="spin"></span>&nbsp; ${msg}</div>`, "Loading");
+  const seq = navSeq;
+  let data;
+  try { data = await fetchIt(); } catch (e) { if (seq === navSeq) failView(e); return; }
+  if (seq === navSeq) render(data);
 }
 
 let editingSet = false;
 function viewHome() {
-  setNav.length = 0;
+  setNav.length = 0; setCur = viewHome;
   let html = "";
   if (state.set && state.set.songs.length) {
     const reset = state.set.src && !editingSet ? `<button class="linkbtn dim" id="resetBtn">Reset</button>` : "";
@@ -1210,7 +1311,7 @@ function viewHome() {
             <input type="text" id="addTxt" autocomplete="off" placeholder="Title 126 4/4">
             <button class="chip" id="addBtn">Add</button>
           </div>
-        </div>`, "Edit set", false);
+        </div>`, "Edit set");
       wireEditView();
       return;
     }
@@ -1226,15 +1327,15 @@ function viewHome() {
     html += `<div class="notice" style="margin-top:6px">Pull this week's set straight from <b>Planning Center Services</b> — song titles, BPMs, and meters come from each song's arrangement.</div>`;
     html += `<button class="primary" id="switchBtn">Load a set</button>`;
   }
-  setView(html, state.set ? "Your set" : "Load a set", false);
+  setView(html, state.set ? "Your set" : "Load a set");
   const eb = $("#editSetBtn");
   if (eb) eb.addEventListener("click", () => { editingSet = true; viewHome(); });
-  $("#switchBtn").addEventListener("click", viewSets);
+  $("#switchBtn").addEventListener("click", () => go(viewSets));
   const rb = $("#resetBtn");
   if (rb) rb.addEventListener("click", () => {
     if (!confirm("Reset this set to what's in Planning Center?\n\nYour changes to it will be lost.")) return;
     const src = state.set.src;
-    goSetlist(src.stId, src.planId, src.label, true);
+    go(() => goSetlist(src.stId, src.planId, src.label, true));
   });
   $$("#setBody .rowbtn[data-ix]").forEach((b) =>
     b.addEventListener("click", () => { loadSong(+b.dataset.ix); closeSheets(); }));
@@ -1350,45 +1451,39 @@ function editSet(mutate) {
   viewHome();
 }
 
-async function goServiceTypes() {
-  if (!state.creds.relay) { openSettings(true); return; }
-  setNav.push("sets");
-  showLoading("Finding your service types…");
-  try {
-    const types = await fetchServiceTypes();
-    if (!types.length) { setView(`<div class="notice">No service types found on this account.</div>`, "Planning Center", true); return; }
+function goServiceTypes() {
+  return loadView("Finding your service types…", fetchServiceTypes, (types) => {
+    if (!types.length) { setView(`<div class="notice">No service types found on this account.</div>`, "Planning Center"); return; }
     setView(
-      types.map((t) => `<button class="rowbtn" data-st="${t.id}"><div class="rt"><div class="a">${escapeHtml(t.name)}</div></div></button>`).join(""),
-      "Pick a service", true);
-    $$("#setBody .rowbtn").forEach((b) =>
-      b.addEventListener("click", () => goPlans(b.dataset.st, b.textContent.trim())));
-  } catch (e) { failView(e); }
+      types.map((t) => `<button class="rowbtn" data-st="${escapeHtml(t.id)}"><div class="rt"><div class="a">${escapeHtml(t.name)}</div></div></button>`).join(""),
+      "Pick a service");
+    $$("#setBody .rowbtn").forEach((b) => b.addEventListener("click", () => {
+      const stId = b.dataset.st, stName = b.textContent.trim();
+      go(() => goPlans(stId, stName));
+    }));
+  });
 }
 
-async function goPlans(stId, stName) {
-  setNav.push("types");
-  showLoading("Loading upcoming plans…");
-  try {
-    const { plans, recent } = await fetchPlans(stId);
-    if (!plans.length) { setView(`<div class="notice">No plans found for ${escapeHtml(stName)}.</div>`, "Plans", true); return; }
+function goPlans(stId, stName) {
+  return loadView("Loading upcoming plans…", () => fetchPlans(stId), ({ plans, recent }) => {
+    if (!plans.length) { setView(`<div class="notice">No plans found for ${escapeHtml(stName)}.</div>`, "Plans"); return; }
     const head = recent ? `<div class="notice">No upcoming plans — showing recent ones.</div>` : "";
     setView(
       head + plans.map((p) =>
-        `<button class="rowbtn" data-plan="${p.id}" data-label="${escapeHtml(p.dates || "")}">
+        `<button class="rowbtn" data-plan="${escapeHtml(p.id)}" data-label="${escapeHtml(p.dates || "")}">
            <div class="rt"><div class="a">${escapeHtml(p.dates || "Plan")}</div>${p.title ? `<div class="b">${escapeHtml(p.title)}</div>` : ""}</div>
          </button>`).join(""),
-      stName, true);
-    $$("#setBody .rowbtn").forEach((b) =>
-      b.addEventListener("click", () => goSetlist(stId, b.dataset.plan, b.dataset.label || "Set")));
-  } catch (e) { failView(e); }
+      stName);
+    $$("#setBody .rowbtn").forEach((b) => b.addEventListener("click", () => {
+      const planId = b.dataset.plan, label = b.dataset.label || "Set";
+      go(() => goSetlist(stId, planId, label));
+    }));
+  });
 }
 
-async function goSetlist(stId, planId, label, reset = false) {
-  setNav.push("plans");
-  showLoading("Grabbing songs and BPMs…");
-  try {
-    const fresh = await fetchSetlist(stId, planId, label);
-    if (!fresh.songs.length) { setView(`<div class="notice">This plan has no song items yet.</div>`, label, true); return; }
+function goSetlist(stId, planId, label, reset = false) {
+  return loadView("Grabbing songs and BPMs…", () => fetchSetlist(stId, planId, label), (fresh) => {
+    if (!fresh.songs.length) { setView(`<div class="notice">This plan has no song items yet.</div>`, label); return; }
     fresh.src = { stId, planId, label };
     fresh.id = "pco:" + planId;
     const saved = !reset && library.find((x) => x.id === fresh.id);
@@ -1397,28 +1492,27 @@ async function goSetlist(stId, planId, label, reset = false) {
       const r = mergePco(saved, fresh);
       set = !r.changes || confirmPcoChanges(r.changes) ? r.set : saved;
     }
-    useSet(set, state.set && state.set.id === fresh.id);
+    useSet(set, state.set?.id === fresh.id);
     editingSet = false; viewHome();
     toast(reset ? "Reset to Planning Center" : saved ? `Opened ${label} with your changes`
-                : `Loaded ${set.songs.length} songs from ${label}`);
-  } catch (e) { failView(e); }
+                : `Loaded ${plural(set.songs.length, "song")} from ${label}`);
+  });
 }
 
 function failView(e) {
   setView(`<div class="notice" style="border-left-color:var(--red)">${escapeHtml(errMsg(e))}</div>
-           <button class="secondary" id="retrySettings">Open Settings</button>`, "Hmm", true);
+           <button class="secondary" id="retrySettings">Open Settings</button>`, "Hmm");
   $("#retrySettings").addEventListener("click", () => openSettings(true));
 }
 
 function viewManual() {
-  setNav.push("sets");
   setView(`
     <div class="field" style="margin-top:4px">
       <label>One song per line</label>
       <textarea id="manualTxt" placeholder="Goodness of God 126 4/4&#10;King of Kings 132&#10;Build My Life 72 6/8"></textarea>
       <div class="hint">Format: title, then BPM, then meter (optional).</div>
     </div>
-    <button class="primary" id="manualGo">Create set</button>`, "New set", true);
+    <button class="primary" id="manualGo">Create set</button>`, "New set");
   $("#manualGo").addEventListener("click", () => {
     const songs = parseManual($("#manualTxt").value);
     if (!songs.length) { toast("Couldn't find any \"title + BPM\" lines"); return; }
@@ -1432,9 +1526,8 @@ function parseManual(text) {
   return String(text || "").split(/\n+/).map((line) => {
     line = line.trim().replace(/^\d+[.)\s-]+\s*/, "");
     if (!line) return null;
-    const meterM = /(\d{1,2}\/\d{1,2}(?:\s+in\s+\d)?)/i.exec(line);
-    const meter = meterM ? meterM[1] : "";
-    let rest = meterM ? line.replace(meterM[1], " ") : line;
+    const meter = (line.match(/\d{1,2}\/\d{1,2}(?:\s+in\s+\d)?/gi) || []).find(parseMeter) || "";   // "24/7" isn't a meter
+    const rest = meter ? line.replace(meter, " ") : line;
     const bpmM = /(?:^|[\s,–—-])(\d{2,3})(?:\s*bpm)?\s*$/i.exec(rest.trim());
     let bpm = null, title = rest.trim();
     if (bpmM && +bpmM[1] >= 30 && +bpmM[1] <= 300) {
@@ -1453,7 +1546,7 @@ function loadSong(ix, opts = {}) {
   const changed = ix !== state.songIx;
   state.songIx = ix;
   const s = state.set.songs[ix];
-  if (s.meter) applyMeter(s.meter);
+  if (!applyMeter(s.meter)) applyMeter("4/4");     // no meter: 4/4, not whatever the last song had
   if (Array.isArray(s.accents) && s.accents.length === state.beats) {
     state.accents = s.accents.slice(); buildLamps();
   }
@@ -1471,14 +1564,15 @@ function loadSong(ix, opts = {}) {
   store.set("songIx", ix);
 }
 
+function cardFoot(s) {
+  return (s.bpm ? `<span class="cbpm">${s.bpm}</span><span class="cbpmlbl">BPM</span>` : `<span class="cbpm none">no BPM</span>`) +
+    (s.meter ? `<span class="cmeter">${escapeHtml(s.meter)}</span>` : "");
+}
 function cardHTML(s, i) {
-  const bpm = s.bpm
-    ? `<span class="cbpm">${s.bpm}</span><span class="cbpmlbl">BPM</span>`
-    : `<span class="cbpm none">no BPM</span>`;
   return `<button class="card" data-ix="${i}">
     <div class="chead"><span class="cnum">${i + 1}</span>${s.key ? `<span class="cchip">Key ${escapeHtml(s.key)}</span>` : ""}</div>
     <div class="ctitle">${escapeHtml(s.title)}</div>
-    <div class="cfoot">${bpm}${s.meter ? `<span class="cmeter">${escapeHtml(s.meter)}</span>` : ""}</div>
+    <div class="cfoot">${cardFoot(s)}</div>
   </button>`;
 }
 
@@ -1510,7 +1604,7 @@ function nearestCardIx() {
 const railMQ = window.matchMedia("(orientation: landscape) and (min-width: 640px)");
 function railMode() { return railMQ.matches; }
 
-let suppressCarousel = false, carouselSettleT = null, carouselRaf = false;
+let suppressCarousel = false, suppressT = null, carouselSettleT = null, carouselRaf = false;
 function scrollToCard(ix, smooth = true) {
   const el = $("#carousel"), card = $$("#carousel .card")[ix];
   if (!card) return;
@@ -1522,7 +1616,8 @@ function scrollToCard(ix, smooth = true) {
     el.scrollTo({ left: card.offsetLeft + card.offsetWidth / 2 - el.clientWidth / 2,
                   behavior: smooth ? "smooth" : "auto" });
   }
-  setTimeout(() => { suppressCarousel = false; }, smooth ? 480 : 60);
+  clearTimeout(suppressT);                  // an older, shorter timer mustn't cut this scroll short
+  suppressT = setTimeout(() => { suppressCarousel = false; }, smooth ? 480 : 60);
 }
 function onCarouselScroll() {
   if (suppressCarousel || railMode()) return;   // rail scrolling just browses; tap selects
@@ -1541,10 +1636,7 @@ function onCarouselScroll() {
 function updateActiveCardBpm() {
   const card = $$("#carousel .card")[state.songIx];
   if (!card) return;
-  const s = state.set.songs[state.songIx];
-  card.querySelector(".cfoot").innerHTML =
-    (s.bpm ? `<span class="cbpm">${s.bpm}</span><span class="cbpmlbl">BPM</span>` : `<span class="cbpm none">no BPM</span>`) +
-    (s.meter ? `<span class="cmeter">${escapeHtml(s.meter)}</span>` : "");
+  card.querySelector(".cfoot").innerHTML = cardFoot(state.set.songs[state.songIx]);
 }
 
 function updateNextBtn() {
@@ -1565,7 +1657,7 @@ function updateSetPill() {
   const pill = $("#setPill");
   if (state.set && state.set.songs.length) {
     pill.classList.add("connected");
-    $("#setPillText").textContent = state.set.name + " · " + state.set.songs.length + " songs";
+    $("#setPillText").textContent = state.set.name + " · " + plural(state.set.songs.length, "song");
   } else {
     pill.classList.remove("connected");
     $("#setPillText").textContent = "No set loaded — tap to load";
@@ -1589,7 +1681,7 @@ function escapeHtml(s) {
 /* ---------------- volume ---------------- */
 function applyVolume() {
   const pct = Math.round(state.vol * 100);
-  if (master) master.gain.value = state.muted ? 0 : state.vol;
+  if (master) master.gain.setTargetAtTime(state.muted ? 0 : state.vol, ctx.currentTime, 0.015);   // no zipper noise
   const sl = $("#volSlider");
   sl.value = pct; sl.style.setProperty("--fill", pct + "%");
   $("#volPct").textContent = state.muted ? "Muted" : pct + "%";
@@ -1599,11 +1691,7 @@ function applyVolume() {
 
 /* ---------------- settings ---------------- */
 function reflectSettings() {
-  $$(".snd").forEach((b) => {
-    const on = b.dataset.snd === state.sound;
-    b.style.borderColor = on ? "var(--amber)" : "var(--line)";
-    b.style.color = on ? "var(--amber)" : "var(--text)";
-  });
+  $$(".snd").forEach((b) => b.classList.toggle("on", b.dataset.snd === state.sound));
   $("#wakeSw").classList.toggle("on", state.wake);
   $("#flashSw").classList.toggle("on", state.flash);
   $("#accentSw").classList.toggle("on", state.accentPitch);
@@ -1612,7 +1700,7 @@ function reflectSettings() {
 function persistSettings() {
   store.set("settings", {
     sound: state.sound, vol: state.vol, wake: state.wake, flash: state.flash, accentPitch: state.accentPitch,
-    bpm: state.bpm, beats: state.beats, denom: state.denom,
+    bpm: state.bpm,                  // tempo for a first song with no BPM of its own
   });
 }
 function persistCreds() {
@@ -1650,8 +1738,7 @@ async function testConnection() {
     document.activeElement?.blur();
     if (settingsFromSet) {
       closeSheets(); openSheet("setSheet");
-      setNav.length = 0; setNav.push("home");   // Back from the service list goes to My sets
-      goServiceTypes();
+      viewHome(); go(viewSets); go(goServiceTypes);   // Back from the service list goes to My sets
     } else setConnStatus("Connected to Planning Center ✓", "ok");
   } catch (e) {
     setConnStatus(errMsg(e), "err");
@@ -1718,7 +1805,6 @@ function wire() {
     applyMeter(e.target.value);
     saveSongProp({ meter: e.target.value, accents: state.accents.slice() });
     updateActiveCardBpm();                   // card showed the old meter
-    persistSettings();
   });
   $("#subSel").addEventListener("change", (e) => {
     state.subdiv = +e.target.value; sub = 0; updateSubChip();
@@ -1743,13 +1829,7 @@ function wire() {
   $("#backdrop").addEventListener("click", closeSheets);
   $$("[data-close]").forEach((b) => b.addEventListener("click", closeSheets));
   $$(".sheet").forEach(swipeToClose);
-  $("#setBack").addEventListener("click", () => {
-    const prev = setNav.pop();
-    if (!prev || prev === "home") viewHome();
-    else if (prev === "sets") viewSets();
-    else if (prev === "types") { setNav.pop(); goServiceTypes(); }
-    else if (prev === "plans") { setNav.pop(); setNav.pop(); goServiceTypes(); }
-  });
+  $("#setBack").addEventListener("click", back);
 
   $$(".snd").forEach((b) => b.addEventListener("click", () => {
     state.sound = b.dataset.snd; reflectSettings(); persistSettings();
@@ -1784,6 +1864,10 @@ function wire() {
 }
 
 /* ---------------- init ---------------- */
+// Saved data from older versions or a damaged store: use it only if it looks like a set.
+const validSet = (x) => !!x && Array.isArray(x.songs) && x.songs.length > 0 &&
+  x.songs.every((s) => s && typeof s.title === "string");
+
 async function init() {
   wire();
   buildLamps(); syncSigSelect(); setBpm(120); updateTransport();
@@ -1791,23 +1875,19 @@ async function init() {
   const [settings, creds, setCache, songIx, sets] = await Promise.all([
     store.get("settings"), store.get("creds"), store.get("setCache"), store.get("songIx"), store.get("sets"),
   ]);
-  if (Array.isArray(sets)) library = sets;
+  if (Array.isArray(sets)) library = sets.filter(validSet);
   if (creds) state.creds = Object.assign(state.creds, creds);
   if (settings) {
-    state.sound = settings.sound || state.sound;
+    if ($$(".snd").some((b) => b.dataset.snd === settings.sound)) state.sound = settings.sound;
     if (settings.vol > 0) state.vol = settings.vol;   // never boot silent: a saved 0 falls back to default
     state.wake = settings.wake ?? state.wake;
     state.flash = settings.flash ?? state.flash;
     state.accentPitch = settings.accentPitch ?? state.accentPitch;
-    if (settings.beats) applyMeter(settings.beats + "/" + (settings.denom || 4));
     if (settings.bpm) setBpm(settings.bpm);
   }
-  const cached = (setCache && setCache.songs && setCache.songs.length)
-    ? setCache
-    : JSON.parse(JSON.stringify(DEMO_SET));
+  const cached = validSet(setCache) ? setCache : JSON.parse(JSON.stringify(DEMO_SET));
   state.set = cached;
-  if (!setCache) store.set("setCache", cached);
-  else saveSet();                              // older installs: give the set an id + add it to the library
+  saveSet();                                   // older installs: give the set an id + add it to the library
   updateSetPill();
   buildCarousel();
   const ix = Number.isInteger(songIx) ? Math.max(0, Math.min(songIx, cached.songs.length - 1)) : 0;

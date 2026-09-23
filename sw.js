@@ -29,7 +29,7 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(caches.open(CACHE).then(async (c) => {
     const hit = await c.match(req, { ignoreSearch: true });
     const net = fetch(req).then((res) => {
-      if (res.ok) c.put(req, res.clone());
+      if (res.ok) e.waitUntil(c.put(req, res.clone()).catch(() => {}));   // full storage, partial response…
       return res;
     });
     if (hit) { e.waitUntil(net.catch(() => {})); return hit; }

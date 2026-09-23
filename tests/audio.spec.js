@@ -22,6 +22,26 @@ test("holding Space toggles once, not on every key repeat", async ({ page }) => 
   expect(toggles).toBe(1);
 });
 
+test("two fingers on + don't leave the tempo climbing after you let go", async ({ page }) => {
+  const bpm = await page.evaluate(async () => {
+    const el = document.querySelector("#plus");
+    const fire = (type, pointerId) => el.dispatchEvent(new PointerEvent(type, { pointerId, button: 0, bubbles: true }));
+    fire("pointerdown", 1); fire("pointerdown", 2);
+    await new Promise((r) => setTimeout(r, 700));               // both held: repeating
+    fire("pointerup", 2);
+    return state.bpm;
+  });
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => state.bpm)).toBe(bpm);
+});
+
+test("nudging the tempo during the count-in doesn't cover the count", async ({ page }) => {
+  await page.click("#playBtn");
+  await page.waitForFunction(() => document.querySelector("#bpmNum").classList.contains("count"));
+  const shown = await page.evaluate(() => { setBpm(100); return document.querySelector("#bpmNum").textContent; });
+  expect(shown).not.toBe("100");
+});
+
 test("changing the sound mid-play keeps the beat even", async ({ page }) => {
   await page.evaluate(() => { state.countIn = 0; });
   await spyClicks(page);

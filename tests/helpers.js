@@ -24,11 +24,14 @@ const clicks = (page) => page.evaluate(() => __clicks);
 const gaps = (list) => list.slice(1).map((c, i) => c.t - list[i].t);
 
 // Fake Planning Center: one service type, one plan, songs from window.__items
-// ([id, title, bpm, meter] rows). Change __items to simulate edits upstream.
+// ([id, title, bpm, meter] rows). Change __items to simulate edits upstream,
+// __delay (ms) for a slow network, __fail (a path fragment) to make that call fail.
 async function mockPco(page, items) {
   await page.evaluate((items) => {
     window.__items = items;
     window.pco = async (path) => {
+      if (window.__delay) await new Promise((r) => setTimeout(r, __delay));
+      if (window.__fail && path.includes(__fail)) throw new Error("BLOCKED");
       if (path.includes("/items")) {
         const included = [];
         const data = __items.map(([id, title, bpm, meter]) => {
