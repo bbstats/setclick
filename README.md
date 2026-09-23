@@ -13,3 +13,16 @@ The app is `metronome.html`, with no build step. Host the repo anywhere static o
    - Return CORS headers (`Access-Control-Allow-Origin`) so the browser can read the response.
    - **Only allow `GET` requests under `/services/v2/`.** Anyone who has the Worker URL can use it, so an open relay would expose your whole Planning Center account, People data included.
 3. In SetClick, open Settings, paste the Worker URL, and tap **Save & test connection**.
+
+## Development
+
+The app needs no build. The tests run it in headless Chromium (they need Node and Python 3):
+
+```sh
+npm install
+npx playwright install chromium   # first time only
+npm test                          # audio timing, sets/Planning Center sync, layout, offline
+npm run screenshots               # iPad/iPhone screenshots into screenshots/
+```
+
+Tests also run on every pull request (GitHub Actions).
