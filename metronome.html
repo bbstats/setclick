@@ -733,18 +733,25 @@ function clickAt(t, kind) {
       osc("sine", 800 * r, t, 0.06, a); osc("sine", 1250 * r, t, 0.06, b);
       break;
     }
-    case "cowbell": {
-      const f = ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 800 * r; f.Q.value = 3;
-      f.connect(out); decay(out, t, level * 0.7, 0.3);
-      osc("square", 540 * r, t, 0.3, f); osc("square", 800 * r, t, 0.3, f);
+    case "cowbell": {                 // acoustic-style: stick strike + inharmonic metal partials
+      out.gain.value = level;
+      // [freq, gain, decay]: higher partials die faster, like a real bell
+      for (const [f, g, d] of [[587, 0.48, 0.16], [845, 0.36, 0.12], [1350, 0.17, 0.07], [2080, 0.1, 0.04]]) {
+        const pg = ctx.createGain(); decay(pg, t, g, d); pg.connect(out);
+        osc("triangle", f * r, t, d, pg);
+      }
+      const n = ctx.createBufferSource(); n.buffer = noise();
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 3000 * r; bp.Q.value = 1.2;
+      const ng = ctx.createGain(); decay(ng, t, 0.45, 0.012);
+      n.connect(bp); bp.connect(ng); ng.connect(out); n.start(t); n.stop(t + 0.02);
       break;
     }
     case "rim": {                     // side stick: noise crack + short tone body
       const n = ctx.createBufferSource(); n.buffer = noise();
       const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 2000 * r;
-      const ng = ctx.createGain(); decay(ng, t, level * 0.66, 0.03);
+      const ng = ctx.createGain(); decay(ng, t, level * 0.45, 0.03);
       n.connect(hp); hp.connect(ng); ng.connect(out); n.start(t); n.stop(t + 0.04);
-      const tg = ctx.createGain(); decay(tg, t, level * 0.36, 0.04); tg.connect(out);
+      const tg = ctx.createGain(); decay(tg, t, level * 0.3, 0.04); tg.connect(out);
       osc("triangle", 1700 * r, t, 0.04, tg);
       break;
     }
