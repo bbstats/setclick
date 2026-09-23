@@ -70,6 +70,9 @@ button{border:0; background:none; padding:0; cursor:pointer;}
   transition:border-color .22s, box-shadow .22s, opacity .22s, transform .22s;
   transform:scale(.965);
 }
+.card{-webkit-touch-callout:none;}
+.card.dragging{transition:none; z-index:2; opacity:1; border-color:var(--amber-dim); box-shadow:0 12px 32px rgba(0,0,0,.55);}
+.carousel.reordering{scroll-snap-type:none;}
 .card.active{
   opacity:1; transform:scale(1);
   border-color:var(--amber-dim);
@@ -1315,12 +1318,13 @@ function viewHome() {
       wireEditView();
       return;
     }
+    const tip = state.set.songs.length > 1 ? `<div class="savehint">Tip: on the main screen, hold a song and drag it to reorder.</div>` : "";
     if (state.set.demo) {
       html += `<div class="notice" style="margin-top:6px">This is a <b>demo set</b> so you can feel the app. Load your real set and the titles, BPMs, and meters come straight from <b>Planning Center</b>.</div>`;
-      html += head + state.set.songs.map((s, i) => songRow(s, i)).join("");
+      html += head + state.set.songs.map((s, i) => songRow(s, i)).join("") + tip;
       html += `<button class="primary" id="switchBtn" style="margin-top:8px">Load your set</button>`;
     } else {
-      html += head + state.set.songs.map((s, i) => songRow(s, i)).join("");
+      html += head + state.set.songs.map((s, i) => songRow(s, i)).join("") + tip;
       html += `<button class="secondary" id="switchBtn">Switch set</button>`;
     }
   } else {
@@ -1390,49 +1394,61 @@ function wireEditView() {
   $$("#setBody .grip").forEach((g) => g.addEventListener("pointerdown", dragRow));
 }
 
-// Drag a song by its grip to reorder. The rows it passes slide out of the way,
-// the list scrolls near the edges, and the drop is one move through editSet.
+// Drag a song by its grip to reorder (Edit set view).
 function dragRow(e) {
   if (e.button > 0) return;
   e.preventDefault();
-  const g = e.currentTarget, body = $("#setBody"), rows = $$("#setBody .editrow");
-  const from = +g.dataset.i, row = rows[from];
-  const pitch = rows.length > 1 ? rows[1].offsetTop - rows[0].offsetTop : row.offsetHeight;
-  const mids = rows.map((r) => r.offsetTop + r.offsetHeight / 2);
-  const y0 = e.clientY + body.scrollTop;
-  let y = e.clientY, to = from, raf = 0;
+  const g = e.currentTarget;
+  dragReorder(e, g, $$("#setBody .editrow"), +g.dataset.i, $("#setBody"), "y");
+}
+
+// Drag items[from] along an axis ("x" or "y") inside `scroller`: the others slide out of
+// the way, the scroller follows near its edges, and the drop is one move through editSet.
+// `handle` receives the rest of the pointer's events; onEnd runs once it's all over.
+function dragReorder(e, handle, items, from, scroller, axis, onEnd = () => {}) {
+  const Y = axis === "y";
+  const pos = (ev) => (Y ? ev.clientY : ev.clientX);
+  const scrolled = () => (Y ? scroller.scrollTop : scroller.scrollLeft);
+  const start = (el) => (Y ? el.offsetTop : el.offsetLeft);
+  const size = (el) => (Y ? el.offsetHeight : el.offsetWidth);
+  const shiftBy = (px) => (px ? `translate${Y ? "Y" : "X"}(${px}px)` : "");
+  const item = items[from];
+  const pitch = items.length > 1 ? start(items[1]) - start(items[0]) : size(item);
+  const mids = items.map((r) => start(r) + size(r) / 2);
+  const p0 = pos(e) + scrolled();
+  let p = pos(e), to = from, raf = 0;
   const place = () => {
-    const dy = y + body.scrollTop - y0, c = mids[from] + dy;
-    row.style.transform = `translateY(${dy}px)`;
+    const d = p + scrolled() - p0, c = mids[from] + d;
+    item.style.transform = shiftBy(d);
     to = mids.filter((m, i) => i !== from && m < c).length;
-    rows.forEach((r, i) => {
+    items.forEach((r, i) => {
       if (i === from) return;
-      const shift = from < to && i > from && i <= to ? -pitch : to < from && i >= to && i < from ? pitch : 0;
-      r.style.transform = shift ? `translateY(${shift}px)` : "";
+      r.style.transform = shiftBy(from < to && i > from && i <= to ? -pitch : to < from && i >= to && i < from ? pitch : 0);
     });
   };
   const tick = () => {
-    const r = body.getBoundingClientRect();
-    if (y < r.top + 48) body.scrollTop -= 8;
-    else if (y > r.bottom - 48) body.scrollTop += 8;
+    const r = scroller.getBoundingClientRect(), lo = Y ? r.top : r.left, hi = Y ? r.bottom : r.right;
+    const step = p < lo + 48 ? -8 : p > hi - 48 ? 8 : 0;
+    if (step) { if (Y) scroller.scrollTop += step; else scroller.scrollLeft += step; }
     place();
     raf = requestAnimationFrame(tick);
   };
-  const move = (ev) => { y = ev.clientY; };
+  const move = (ev) => { p = pos(ev); };
   const end = (ev) => {
     cancelAnimationFrame(raf);
-    g.removeEventListener("pointermove", move);
-    g.removeEventListener("pointerup", end);
-    g.removeEventListener("pointercancel", end);
-    row.classList.remove("dragging");
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", end);
+    handle.removeEventListener("pointercancel", end);
+    item.classList.remove("dragging");
+    items.forEach((r) => { r.style.transform = ""; });
     if (ev.type === "pointerup" && to !== from) editSet((songs) => songs.splice(to, 0, songs.splice(from, 1)[0]));
-    else rows.forEach((r) => { r.style.transform = ""; });
+    onEnd();
   };
-  row.classList.add("dragging");
-  try { g.setPointerCapture(e.pointerId); } catch (err) {}
-  g.addEventListener("pointermove", move);
-  g.addEventListener("pointerup", end);
-  g.addEventListener("pointercancel", end);
+  item.classList.add("dragging");
+  try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+  handle.addEventListener("pointermove", move);
+  handle.addEventListener("pointerup", end);
+  handle.addEventListener("pointercancel", end);
   raf = requestAnimationFrame(tick);
 }
 
@@ -1581,9 +1597,45 @@ function buildCarousel() {
   if (!state.set || !state.set.songs.length) { el.classList.remove("show"); el.innerHTML = ""; return; }
   el.innerHTML = state.set.songs.map(cardHTML).join("");
   el.classList.add("show");
-  $$("#carousel .card").forEach((c) =>
-    c.addEventListener("click", () => loadSong(+c.dataset.ix)));
+  $$("#carousel .card").forEach((c) => {
+    c.addEventListener("click", () => loadSong(+c.dataset.ix));
+    c.addEventListener("pointerdown", holdToDrag);
+    c.addEventListener("contextmenu", (e) => e.preventDefault());   // Android's long-press menu
+  });
   updateCarouselActive();
+}
+
+// Hold a card still for a moment, then drag it to move the song. Moving first is a
+// normal swipe; a quick tap still selects. Neither the hold nor the drop selects the card.
+const HOLD_MS = 400, HOLD_SLOP = 8;
+let cardDrag = false, eatClick = false;
+function holdToDrag(e) {
+  if (e.button > 0 || cardDrag || state.set.songs.length < 2) return;
+  const card = e.currentTarget, x0 = e.clientX, y0 = e.clientY;
+  const quit = () => {
+    clearTimeout(timer);
+    card.removeEventListener("pointermove", moved);
+    card.removeEventListener("pointerup", quit);
+    card.removeEventListener("pointercancel", quit);
+  };
+  const moved = (ev) => { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > HOLD_SLOP) quit(); };
+  const timer = setTimeout(() => {
+    quit();
+    const el = $("#carousel");
+    clearTimeout(suppressT); clearTimeout(carouselSettleT);
+    cardDrag = eatClick = suppressCarousel = true;       // the carousel doesn't pick songs mid-drag
+    el.classList.add("reordering");
+    try { navigator.vibrate?.(10); } catch (err) {}
+    dragReorder(e, card, $$("#carousel .card"), +card.dataset.ix, el, railMode() ? "y" : "x", () => {
+      cardDrag = false;
+      el.classList.remove("reordering");
+      scrollToCard(state.songIx);                        // back to the song you're on (also ends the suppress)
+      setTimeout(() => { eatClick = false; }, 0);        // after the click this pointerup makes
+    });
+  }, HOLD_MS);
+  card.addEventListener("pointermove", moved);
+  card.addEventListener("pointerup", quit);
+  card.addEventListener("pointercancel", quit);
 }
 
 function updateCarouselActive() {
@@ -1822,6 +1874,11 @@ function wire() {
   });
 
   $("#carousel").addEventListener("scroll", onCarouselScroll, { passive: true });
+  // While a card is being dragged the finger moves the card, not the carousel.
+  $("#carousel").addEventListener("touchmove", (e) => { if (cardDrag) e.preventDefault(); }, { passive: false });
+  $("#carousel").addEventListener("click", (e) => {
+    if (eatClick) { e.stopPropagation(); eatClick = false; }
+  }, true);
 
   $("#setPill").addEventListener("click", () => { editingSet = false; viewHome(); openSheet("setSheet"); });
   $("#settingsBtn").addEventListener("click", () => openSettings());

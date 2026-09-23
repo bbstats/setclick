@@ -67,6 +67,82 @@ test("edit set: drag a song by its grip to reorder", async ({ page }) => {
   expect(await titles(page)).toEqual(["Goodness of God@126", "King of Kings@136", "Build My Life@69"]);
 });
 
+// Hold a carousel card, then drag it toward `to` (holding near the edge lets the carousel
+// scroll there if that card is off-screen). Works for the portrait strip and landscape rail.
+async function holdAndDrag(page, from, to) {
+  const card = await page.locator("#carousel .card").nth(from).boundingBox();
+  const box = await page.locator("#carousel").boundingBox();
+  const rail = await page.evaluate(() => railMode());
+  const x = card.x + card.width / 2, y = card.y + card.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.waitForTimeout(500);                            // hold
+  const edge = to > from ? (rail ? box.y + box.height - 10 : box.x + box.width - 10) : (rail ? box.y + 10 : box.x + 10);
+  await page.mouse.move(rail ? x : edge, rail ? edge : y, { steps: 10 });
+  await page.waitForTimeout(700);                            // let it scroll along if needed
+  await page.mouse.up();
+}
+
+test.describe("hold a song on the main screen to move it", () => {
+  for (const [name, viewport] of [["landscape rail", { width: 1180, height: 820 }], ["portrait strip", { width: 390, height: 844 }]]) {
+    test(name, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await holdAndDrag(page, 0, 2);
+      expect(await titles(page)).toEqual(["King of Kings@136", "Build My Life@69", "Goodness of God@126"]);
+      expect(await page.evaluate(() => state.set.songs[state.songIx].title)).toBe("Goodness of God");   // still on it
+      await holdAndDrag(page, 2, 0);
+      expect(await titles(page)).toEqual(["Goodness of God@126", "King of Kings@136", "Build My Life@69"]);
+      await holdAndDrag(page, 0, 2);
+      await page.reload();
+      await open(page);
+      expect(await titles(page)).toEqual(["King of Kings@136", "Build My Life@69", "Goodness of God@126"]);
+    });
+  }
+
+  test("a tap still selects; a hold without moving neither selects nor moves", async ({ page }) => {
+    await page.setViewportSize({ width: 1180, height: 820 });
+    const cards = page.locator("#carousel .card");
+    await cards.nth(1).click();
+    expect(await page.evaluate(() => state.songIx)).toBe(1);
+    const b = await cards.nth(2).boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(600);
+    await page.mouse.up();
+    expect(await page.evaluate(() => state.songIx)).toBe(1);
+    expect(await titles(page)).toEqual(["Goodness of God@126", "King of Kings@136", "Build My Life@69"]);
+  });
+
+  test.describe("on a touchscreen", () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+    // Real touch input (not mouse), so the browser's own swipe-to-scroll is in play.
+    async function touch(page, points) {
+      const cdp = await page.context().newCDPSession(page);
+      for (const [type, x, y, wait] of points) {
+        await cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y }] });
+        if (wait) await page.waitForTimeout(wait);
+      }
+    }
+
+    test("hold and drag moves the song instead of scrolling", async ({ page }) => {
+      const c = await page.locator("#carousel .card").nth(0).boundingBox();
+      const x = c.x + c.width / 2, y = c.y + c.height / 2;
+      const path = Array.from({ length: 10 }, (_, i) => ["touchMove", x + (i + 1) * 17, y, 16]);
+      await touch(page, [["touchStart", x, y, 500], ...path, ["touchMove", 380, y, 700], ["touchEnd"]]);
+      expect(await titles(page)).toEqual(["King of Kings@136", "Build My Life@69", "Goodness of God@126"]);
+    });
+
+    test("a quick swipe just browses", async ({ page }) => {
+      const c = await page.locator("#carousel .card").nth(0).boundingBox();
+      const x = c.x + c.width / 2, y = c.y + c.height / 2;
+      const path = Array.from({ length: 8 }, (_, i) => ["touchMove", x - (i + 1) * 20, y, 16]);
+      await touch(page, [["touchStart", x, y, 30], ...path, ["touchEnd", 0, 0, 600]]);
+      expect(await titles(page)).toEqual(["Goodness of God@126", "King of Kings@136", "Build My Life@69"]);
+    });
+  });
+});
+
 const PLAN = [["1", "Goodness of God", 126, "4/4"], ["2", "King of Kings", 136, "4/4"], ["3", "Build My Life", 69, "4/4"]];
 
 async function loadPlan(page) {
