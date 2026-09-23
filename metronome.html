@@ -92,6 +92,20 @@ button{border:0; background:none; padding:0; cursor:pointer;}
 .cbpmlbl{font-size:11px; font-weight:800; letter-spacing:.14em; color:var(--faint);}
 .cmeter{margin-left:auto; font-size:13px; font-weight:700; color:var(--dim);}
 
+/* ---------- volume ---------- */
+.volrow{flex:0 0 auto; display:flex; align-items:center; gap:10px; width:100%; max-width:340px; margin:10px auto 0;}
+.volmute{width:36px; height:36px; border-radius:50%; color:var(--dim); flex:0 0 auto; display:flex; align-items:center; justify-content:center;}
+.volmute svg{width:22px; height:22px;}
+.volmute .x{display:none;}
+.volrow.muted .volmute{color:var(--red);}
+.volrow.muted .volmute .waves{display:none;}
+.volrow.muted .volmute .x{display:inline;}
+.volrow input[type=range]{height:4px;}
+.volrow input[type=range]::-webkit-slider-thumb{width:22px; height:22px;}
+.volrow.muted input[type=range]{opacity:.35;}
+.volpct{min-width:44px; text-align:right; font-size:12px; font-weight:700; color:var(--faint); font-variant-numeric:tabular-nums;}
+.volrow.muted .volpct{color:var(--red);}
+
 /* ---------- tempo display ---------- */
 .display{flex:1 1 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:0;}
 .bpm-num{
@@ -297,8 +311,8 @@ textarea{min-height:110px; resize:vertical;}
     max-width:none; margin:0;
     display:grid; column-gap:16px; row-gap:4px;
     grid-template-columns:minmax(230px, 30vw) 1fr;
-    grid-template-rows:auto 1fr auto;
-    grid-template-areas:"top top" "rail display" "rail controls";
+    grid-template-rows:auto auto 1fr auto;
+    grid-template-areas:"top top" "rail vol" "rail display" "rail controls";
     padding:calc(var(--sat) + 6px) calc(env(safe-area-inset-right,0px) + 16px)
             calc(var(--sab) + 10px) calc(env(safe-area-inset-left,0px) + 16px);
   }
@@ -315,6 +329,7 @@ textarea{min-height:110px; resize:vertical;}
   .chead{margin-bottom:6px;}
   .cfoot{margin-top:5px;}
   .cbpm{font-size:24px;}
+  .volrow{grid-area:vol; margin-top:4px;}
   .display{grid-area:display; min-height:0;}
   .controls{grid-area:controls; gap:10px;}
   .bpm-num{font-size:clamp(56px, 26vh, 260px);}
@@ -349,6 +364,8 @@ textarea{min-height:110px; resize:vertical;}
   .chip{height:46px; font-size:14px;}
   .step{width:46px; height:46px; font-size:22px;}
   .sliderrow{gap:10px;}
+  .volrow{margin-top:0;}
+  .volmute{width:28px; height:28px;}
 }
 </style>
 </head>
@@ -362,6 +379,18 @@ textarea{min-height:110px; resize:vertical;}
 </div>
 
 <div class="carousel" id="carousel"></div>
+
+<div class="volrow" id="volRow">
+  <button class="volmute" id="muteBtn" aria-label="Mute" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/>
+      <path class="waves" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>
+      <path class="x" d="m16 9 6 6m0-6-6 6"/>
+    </svg>
+  </button>
+  <input type="range" id="volSlider" min="0" max="100" value="80" aria-label="Volume">
+  <span class="volpct" id="volPct">80%</span>
+</div>
 
 <div class="display">
   <div class="bpm-num" id="bpmNum">120</div>
@@ -428,11 +457,6 @@ textarea{min-height:110px; resize:vertical;}
       </div>
     </div>
 
-    <div class="field">
-      <label for="volSlider">Volume</label>
-      <input type="range" id="volSlider" min="0" max="100" value="80" style="width:100%">
-    </div>
-
     <div class="togglerow">
       <div><div class="tl">Keep screen awake</div><div class="ts">While the click is running</div></div>
       <button class="switch on" id="wakeSw"></button>
@@ -477,7 +501,7 @@ const $$ = (s) => Array.from(document.querySelectorAll(s));
 const state = {
   bpm: 120, beats: 4, denom: 4, subdiv: 1,
   accents: [2, 1, 1, 1],          // 2 accent, 1 normal, 0 mute
-  sound: "stick", vol: 0.8,
+  sound: "stick", vol: 0.8, muted: false,   // mute is never persisted
   countIn: 1,                      // per-song: bars of spoken count (0/1/2)
   flash: false, wake: true,
   playing: false,
@@ -577,7 +601,7 @@ function initAudio() {
   const AC = window.AudioContext || window.webkitAudioContext;
   ctx = new AC({ latencyHint: "interactive" });
   master = ctx.createGain();
-  master.gain.value = state.vol;
+  master.gain.value = state.muted ? 0 : state.vol;
   master.connect(ctx.destination);
   ctx.onstatechange = () => {                // e.g. a notification or another app grabbed audio
     if (!state.playing || ctx.state === "running") return;
@@ -1199,6 +1223,17 @@ function escapeHtml(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+/* ---------------- volume ---------------- */
+function applyVolume() {
+  const pct = Math.round(state.vol * 100);
+  if (master) master.gain.value = state.muted ? 0 : state.vol;
+  const sl = $("#volSlider");
+  sl.value = pct; sl.style.setProperty("--fill", pct + "%");
+  $("#volPct").textContent = state.muted ? "Muted" : pct + "%";
+  $("#volRow").classList.toggle("muted", state.muted);
+  $("#muteBtn").setAttribute("aria-pressed", String(state.muted));
+}
+
 /* ---------------- settings ---------------- */
 function reflectSettings() {
   $$(".snd").forEach((b) => {
@@ -1206,7 +1241,6 @@ function reflectSettings() {
     b.style.borderColor = on ? "var(--amber)" : "var(--line)";
     b.style.color = on ? "var(--amber)" : "var(--text)";
   });
-  $("#volSlider").value = Math.round(state.vol * 100);
   $("#wakeSw").classList.toggle("on", state.wake);
   $("#flashSw").classList.toggle("on", state.flash);
   $("#pcoRelay").value = state.creds.relay;
@@ -1282,10 +1316,10 @@ function wire() {
     if (ctx) clickAt(ctx.currentTime + 0.01, 2);
   }));
   $("#volSlider").addEventListener("input", (e) => {
-    state.vol = +e.target.value / 100;
-    if (master) master.gain.value = state.vol;
-    persistSettings();
+    state.vol = +e.target.value / 100; state.muted = false;
+    applyVolume(); persistSettings();
   });
+  $("#muteBtn").addEventListener("click", () => { state.muted = !state.muted; applyVolume(); });
   $("#wakeSw").addEventListener("click", () => {
     state.wake = !state.wake; reflectSettings(); persistSettings();
     if (state.playing) state.wake ? requestWake() : releaseWake();
@@ -1327,7 +1361,7 @@ async function init() {
   if (creds) state.creds = Object.assign(state.creds, creds);
   if (settings) {
     state.sound = settings.sound === "wood" ? "stick" : (settings.sound || state.sound);
-    state.vol = settings.vol ?? state.vol;
+    if (settings.vol > 0) state.vol = settings.vol;   // never boot silent: a saved 0 falls back to default
     state.wake = settings.wake ?? state.wake;
     state.flash = settings.flash ?? state.flash;
     if (settings.beats) applyMeter(settings.beats + "/" + (settings.denom || 4));
@@ -1342,7 +1376,7 @@ async function init() {
   buildCarousel();
   const ix = Number.isInteger(songIx) ? Math.max(0, Math.min(songIx, cached.songs.length - 1)) : 0;
   loadSong(ix, { instant: true, silent: true });
-  reflectSettings();
+  reflectSettings(); applyVolume();
   window.addEventListener("pagehide", persistSettings);
 }
 init();
