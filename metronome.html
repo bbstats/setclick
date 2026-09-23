@@ -219,6 +219,7 @@ select.chip{appearance:none; -webkit-appearance:none; text-align:center; text-al
 .sheet header .close{font-size:22px; color:var(--dim); width:34px; height:34px; border-radius:50%; background:var(--panel-2);}
 .sheet .body{overflow-y:auto; -webkit-overflow-scrolling:touch; padding:4px 18px 18px;}
 .grab{width:38px; height:5px; border-radius:3px; background:var(--line); margin:10px auto 0;}
+.sheet .grab,.sheet header{touch-action:none;}   /* drag down to close */
 
 .rowbtn{
   width:100%; text-align:left; background:var(--panel-2); border:1px solid var(--line);
@@ -245,7 +246,13 @@ select.chip{appearance:none; -webkit-appearance:none; text-align:center; text-al
 .headbtns{display:flex; gap:14px; flex:0 0 auto;}
 .setrow{cursor:pointer;}
 .nowtag{font-size:12px; font-weight:800; letter-spacing:.06em; color:var(--amber); text-transform:uppercase; flex:0 0 auto;}
-.editrow{padding:10px 10px 10px 16px; gap:8px;}
+.editrow{padding:10px 10px 10px 4px; gap:8px; position:relative; transition:transform .15s;}
+.editrow.dragging{transition:none; z-index:2; border-color:var(--amber-dim); box-shadow:0 10px 28px rgba(0,0,0,.5);}
+.grip{
+  width:28px; align-self:stretch; flex:0 0 auto; display:flex; align-items:center; justify-content:center;
+  color:var(--faint); cursor:grab; touch-action:none;
+}
+.editrow.dragging .grip{color:var(--amber); cursor:grabbing;}
 .ebtn{
   width:38px; height:38px; border-radius:10px; background:var(--bg); border:1px solid var(--line);
   color:var(--dim); font-size:12px; flex:0 0 auto; display:flex; align-items:center; justify-content:center;
@@ -258,7 +265,7 @@ select.chip{appearance:none; -webkit-appearance:none; text-align:center; text-al
 
 .field{margin-bottom:14px;}
 .field label{display:block; font-size:12px; font-weight:700; letter-spacing:.06em; color:var(--dim); margin-bottom:6px; text-transform:uppercase;}
-.field input[type=text],.field input[type=password],.field textarea{
+.field input[type=text],.field input[type=url],.field input[type=password],.field textarea{
   width:100%; background:var(--bg); border:1px solid var(--line); border-radius:12px;
   color:var(--text); font:inherit; font-size:15px; padding:12px 14px; outline:none;
   -webkit-user-select:text; user-select:text;
@@ -277,6 +284,10 @@ textarea{min-height:110px; resize:vertical;}
   color:var(--text); font-size:14px; font-weight:700; margin-top:10px;
 }
 .primary:active,.secondary:active{opacity:.85;}
+.savehint{font-size:12px; color:var(--faint); margin-top:10px;}
+.connstatus{font-size:13px; line-height:1.45; color:var(--dim); margin-top:10px; min-height:1.45em;}
+.connstatus.ok{color:var(--green);}
+.connstatus.err{color:var(--red);}
 .primary[disabled]{opacity:.4;}
 
 .togglerow{display:flex; align-items:center; justify-content:space-between; padding:13px 2px; border-bottom:1px solid var(--line);}
@@ -482,7 +493,7 @@ textarea{min-height:110px; resize:vertical;}
 <div class="sheet" id="settingsSheet">
   <div class="grab"></div>
   <header>
-    <span style="width:52px"></span>
+    <button class="back" id="settingsBack" style="visibility:hidden">&#8249; Back</button>
     <h2 style="text-align:center">Settings</h2>
     <button class="close" data-close aria-label="Close">&#10005;</button>
   </header>
@@ -514,13 +525,16 @@ textarea{min-height:110px; resize:vertical;}
       <button class="switch" id="accentSw"></button>
     </div>
 
-    <h2 style="font-size:16px; margin:22px 0 10px">Planning Center Connection</h2>
+    <div class="hint savehint">Changes save as you make them.</div>
+
+    <h2 id="pcoHead" style="font-size:16px; margin:22px 0 10px">Planning Center Connection</h2>
     <div class="field">
       <label for="pcoRelay">Relay URL</label>
-      <input type="text" id="pcoRelay" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://your-relay.workers.dev">
+      <input type="url" id="pcoRelay" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" placeholder="https://your-relay.workers.dev">
       <div class="hint">Your Planning Center App ID &amp; Secret live in the Cloudflare Worker's environment variables, not here. Just enter the Worker's URL.</div>
     </div>
-    <button class="primary" id="testBtn">Save &amp; test connection</button>
+    <button class="primary" id="testBtn">Connect</button>
+    <div class="connstatus" id="connStatus" role="status"></div>
 
   </div>
 </div>
@@ -1011,11 +1025,11 @@ async function pco(path) {
   return res.json();
 }
 const BLOCKED_MSG =
-  "The connection failed. Make sure you entered your live Cloudflare Worker URL in Settings.";
+  "Couldn't reach your relay. Check that the Worker URL is right and the Worker is deployed.";
 const ERR_MSGS = {
   BLOCKED: BLOCKED_MSG,
   TIMEOUT: "Planning Center took too long to respond. Check your connection and try again.",
-  MISSING_RELAY: "Add your Planning Center Relay URL in Settings first.",
+  MISSING_RELAY: "Add your Planning Center Relay URL first.",
 };
 const errMsg = (e) => ERR_MSGS[e.message] || e.message;
 
@@ -1227,6 +1241,9 @@ function songRow(s, i) {
 function editRow(s, i, all) {
   const meta = [s.bpm ? s.bpm + " BPM" : "no BPM", s.key, s.meter].filter(Boolean).join(" · ");
   return `<div class="rowbtn editrow${i === state.songIx ? " current" : ""}">
+      <span class="grip" data-i="${i}" aria-hidden="true"><svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
+        <circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="2" cy="8" r="1.6"/>
+        <circle cx="8" cy="8" r="1.6"/><circle cx="2" cy="14" r="1.6"/><circle cx="8" cy="14" r="1.6"/></svg></span>
       <div class="num">${i + 1}</div>
       <div class="rt"><div class="a">${escapeHtml(s.title)}</div><div class="b">${escapeHtml(meta)}</div></div>
       <button class="ebtn" data-act="up" data-i="${i}" aria-label="Move up"${i === 0 ? " disabled" : ""}>&#9650;</button>
@@ -1256,6 +1273,53 @@ function wireEditView() {
   };
   $("#addBtn").addEventListener("click", add);
   $("#addTxt").addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
+  $$("#setBody .grip").forEach((g) => g.addEventListener("pointerdown", dragRow));
+}
+
+// Drag a song by its grip to reorder. The rows it passes slide out of the way,
+// the list scrolls near the edges, and the drop is one move through editSet.
+function dragRow(e) {
+  if (e.button > 0) return;
+  e.preventDefault();
+  const g = e.currentTarget, body = $("#setBody"), rows = $$("#setBody .editrow");
+  const from = +g.dataset.i, row = rows[from];
+  const pitch = rows.length > 1 ? rows[1].offsetTop - rows[0].offsetTop : row.offsetHeight;
+  const mids = rows.map((r) => r.offsetTop + r.offsetHeight / 2);
+  const y0 = e.clientY + body.scrollTop;
+  let y = e.clientY, to = from, raf = 0;
+  const place = () => {
+    const dy = y + body.scrollTop - y0, c = mids[from] + dy;
+    row.style.transform = `translateY(${dy}px)`;
+    to = mids.filter((m, i) => i !== from && m < c).length;
+    rows.forEach((r, i) => {
+      if (i === from) return;
+      const shift = from < to && i > from && i <= to ? -pitch : to < from && i >= to && i < from ? pitch : 0;
+      r.style.transform = shift ? `translateY(${shift}px)` : "";
+    });
+  };
+  const tick = () => {
+    const r = body.getBoundingClientRect();
+    if (y < r.top + 48) body.scrollTop -= 8;
+    else if (y > r.bottom - 48) body.scrollTop += 8;
+    place();
+    raf = requestAnimationFrame(tick);
+  };
+  const move = (ev) => { y = ev.clientY; };
+  const end = (ev) => {
+    cancelAnimationFrame(raf);
+    g.removeEventListener("pointermove", move);
+    g.removeEventListener("pointerup", end);
+    g.removeEventListener("pointercancel", end);
+    row.classList.remove("dragging");
+    if (ev.type === "pointerup" && to !== from) editSet((songs) => songs.splice(to, 0, songs.splice(from, 1)[0]));
+    else rows.forEach((r) => { r.style.transform = ""; });
+  };
+  row.classList.add("dragging");
+  try { g.setPointerCapture(e.pointerId); } catch (err) {}
+  g.addEventListener("pointermove", move);
+  g.addEventListener("pointerup", end);
+  g.addEventListener("pointercancel", end);
+  raf = requestAnimationFrame(tick);
 }
 
 // Apply a change to the song list, keeping the current song selected if it survived.
@@ -1274,11 +1338,7 @@ function editSet(mutate) {
 }
 
 async function goServiceTypes() {
-  if (!state.creds.relay) {
-    closeSheets(); openSheet("settingsSheet");
-    toast("Add your Planning Center Relay URL in Settings first");
-    return;
-  }
+  if (!state.creds.relay) { openSettings(true); return; }
   setNav.push("sets");
   showLoading("Finding your service types…");
   try {
@@ -1334,7 +1394,7 @@ async function goSetlist(stId, planId, label, reset = false) {
 function failView(e) {
   setView(`<div class="notice" style="border-left-color:var(--red)">${escapeHtml(errMsg(e))}</div>
            <button class="secondary" id="retrySettings">Open Settings</button>`, "Hmm", true);
-  $("#retrySettings").addEventListener("click", () => { closeSheets(); openSheet("settingsSheet"); });
+  $("#retrySettings").addEventListener("click", () => openSettings(true));
 }
 
 function viewManual() {
@@ -1547,6 +1607,66 @@ function persistCreds() {
   store.set("creds", state.creds);
 }
 
+// fromSet: sent here from the set sheet to set up Planning Center. Back returns there,
+// and once the connection works it carries on to picking a service.
+let settingsFromSet = false;
+function openSettings(fromSet = false) {
+  settingsFromSet = fromSet;
+  reflectSettings();
+  setConnStatus(fromSet && !state.creds.relay ? "Add your Relay URL to load sets from Planning Center." : "");
+  $("#settingsBack").style.visibility = fromSet ? "visible" : "hidden";
+  closeSheets(); openSheet("settingsSheet");
+  if (fromSet) {
+    const body = $("#settingsBody");
+    body.scrollTop = $("#pcoHead").offsetTop - body.offsetTop - 4;
+    $("#pcoRelay").focus({ preventScroll: true });
+  }
+}
+function setConnStatus(msg, kind = "") {
+  const el = $("#connStatus");
+  el.textContent = msg; el.className = "connstatus " + kind;
+}
+async function testConnection() {
+  const btn = $("#testBtn");
+  if (btn.disabled) return;
+  persistCreds();
+  if (!state.creds.relay) { setConnStatus("Enter your Cloudflare Worker URL first.", "err"); $("#pcoRelay").focus(); return; }
+  btn.disabled = true; btn.textContent = "Connecting…"; setConnStatus("");
+  try {
+    await pco("/services/v2/service_types?per_page=1");
+    document.activeElement?.blur();
+    if (settingsFromSet) {
+      closeSheets(); openSheet("setSheet");
+      setNav.length = 0; setNav.push("home");   // Back from the service list goes to My sets
+      goServiceTypes();
+    } else setConnStatus("Connected to Planning Center ✓", "ok");
+  } catch (e) {
+    setConnStatus(errMsg(e), "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "Connect";
+  }
+}
+
+// Drag a sheet down by its header to close it.
+function swipeToClose(sheet) {
+  let y0 = null, t0 = 0;
+  sheet.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest(".grab, header") || e.target.closest("button")) return;
+    y0 = e.clientY; t0 = e.timeStamp; sheet.style.transition = "none";
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (y0 !== null) sheet.style.transform = `translateY(${Math.max(0, e.clientY - y0)}px)`;
+  });
+  const end = (e) => {
+    if (y0 === null) return;
+    const dy = e.clientY - y0, flick = dy > 30 && dy / (e.timeStamp - t0) > 0.5;
+    y0 = null; sheet.style.transition = sheet.style.transform = "";
+    if (e.type === "pointerup" && (dy > 90 || flick)) closeSheets();
+  };
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+}
+
 /* ---------------- wiring ---------------- */
 function updateTransport() {
   const b = $("#playBtn");
@@ -1605,9 +1725,11 @@ function wire() {
   $("#carousel").addEventListener("scroll", onCarouselScroll, { passive: true });
 
   $("#setPill").addEventListener("click", () => { editingSet = false; viewHome(); openSheet("setSheet"); });
-  $("#settingsBtn").addEventListener("click", () => { reflectSettings(); openSheet("settingsSheet"); });
+  $("#settingsBtn").addEventListener("click", () => openSettings());
+  $("#settingsBack").addEventListener("click", () => { closeSheets(); openSheet("setSheet"); });
   $("#backdrop").addEventListener("click", closeSheets);
   $$("[data-close]").forEach((b) => b.addEventListener("click", closeSheets));
+  $$(".sheet").forEach(swipeToClose);
   $("#setBack").addEventListener("click", () => {
     const prev = setNav.pop();
     if (!prev || prev === "home") viewHome();
@@ -1634,23 +1756,13 @@ function wire() {
   $("#flashSw").addEventListener("click", () => { state.flash = !state.flash; reflectSettings(); persistSettings(); });
   $("#accentSw").addEventListener("click", () => { state.accentPitch = !state.accentPitch; reflectSettings(); persistSettings(); });
 
-  $("#testBtn").addEventListener("click", async () => {
-    persistCreds();
-    if (!state.creds.relay) { toast("Enter your Cloudflare Relay URL first"); return; }
-    const btn = $("#testBtn"); btn.disabled = true; btn.textContent = "Testing…";
-    try {
-      await pco("/services/v2/service_types?per_page=1");
-      toast("Connected to secure relay ✓");
-      closeSheets(); viewHome(); openSheet("setSheet");
-    } catch (e) {
-      toast(errMsg(e), 6500);
-    } finally {
-      btn.disabled = false; btn.textContent = "Save & test connection";
-    }
-  });
+  $("#testBtn").addEventListener("click", testConnection);
   $("#pcoRelay").addEventListener("change", persistCreds);
+  $("#pcoRelay").addEventListener("input", () => setConnStatus(""));
+  $("#pcoRelay").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); testConnection(); } });
 
   window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && $(".sheet.show")) { closeSheets(); return; }
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return;
     if (e.code === "Space") { e.preventDefault(); if (!e.repeat) toggle(); }   // held key would flap start/stop
     else if (e.code === "ArrowRight") loadSong(state.songIx + 1);
