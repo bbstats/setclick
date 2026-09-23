@@ -12,7 +12,7 @@ The app is `metronome.html`, with no build step. Host the repo anywhere static o
    - Save the App ID and Secret as Worker environment variables. The Worker adds the `Authorization: Basic …` header itself, so the app never sees your credentials.
    - Return CORS headers (`Access-Control-Allow-Origin`) so the browser can read the response.
    - **Only allow `GET` requests under `/services/v2/`.** Anyone who has the Worker URL can use it, so an open relay would expose your whole Planning Center account, People data included.
-3. In SetClick, open Settings, paste the Worker URL, and tap **Save & test connection**.
+3. In SetClick, open Settings, paste the Worker URL, and tap **Connect**.
 
 ## Development
 
