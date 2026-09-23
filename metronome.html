@@ -14,6 +14,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <style>
 :root{
+  color-scheme:dark;
   --bg:#101215; --panel:#1a1d22; --panel-2:#22262d; --line:#2e333b;
   --text:#e8eaed; --dim:#8b929d; --faint:#565d68;
   --amber:#ffae42; --amber-dim:#7a5a28; --red:#ff4f3f; --green:#3dd68c;
@@ -31,6 +32,7 @@ body{
   height:100dvh; padding:calc(var(--sat) + 8px) 16px calc(var(--sab) + 12px);
 }
 button,select{font:inherit; color:inherit;}
+select option{background:var(--panel); color:var(--text);}
 button{border:0; background:none; padding:0; cursor:pointer;}
 
 /* ---------- top bar ---------- */
@@ -162,10 +164,13 @@ input[type=range]::-webkit-slider-thumb{
 }
 .chip:active{background:var(--panel-2);}
 .chip.tap:active{border-color:var(--amber); color:var(--amber);}
+.sndgrid{display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;}
+.sndgrid .chip{height:48px; font-size:13px; padding:0 4px;}
 .chip.count{flex-direction:column; gap:2px; line-height:1; font-size:13px;}
 .chip.count .eyebrow{font-size:9px; letter-spacing:.14em; color:var(--faint); font-weight:800;}
 .chip.count.off #cntVal{color:var(--dim);}
 .chip.count:not(.off) #cntVal{color:var(--amber);}
+#weakVal{color:var(--amber);}
 #subChip{position:relative;}
 #subChip #subVal{color:var(--amber); font-size:16px;}
 #subChip select{position:absolute; inset:0; width:100%; height:100%; opacity:0; font-size:16px;}
@@ -425,7 +430,7 @@ textarea{min-height:110px; resize:vertical;}
   <div class="bpm-num" id="bpmNum">120</div>
   <div class="bpm-label">BPM</div>
   <div class="lamps" id="lamps"></div>
-  <div class="lamps-hint">Tap a beat to accent or mute it</div>
+  <div class="lamps-hint">Tap a beat to accent or mute it · red = beat 1</div>
 </div>
 
 <div class="controls">
@@ -448,6 +453,9 @@ textarea{min-height:110px; resize:vertical;}
     </div>
     <button class="chip count" id="cntChip" aria-label="Count-in">
       <span class="eyebrow">COUNT</span><span id="cntVal">1 bar</span>
+    </button>
+    <button class="chip count" id="weakChip" aria-label="Weak beat volume">
+      <span class="eyebrow">WEAK</span><span id="weakVal">50%</span>
     </button>
   </div>
   <div class="transportrow">
@@ -482,10 +490,14 @@ textarea{min-height:110px; resize:vertical;}
 
     <div class="field" style="margin-top:6px">
       <label>Sound</label>
-      <div class="btnrow">
+      <div class="sndgrid">
         <button class="chip snd" data-snd="stick">Sticks</button>
-        <button class="chip snd" data-snd="click">Click</button>
+        <button class="chip snd" data-snd="wood">Woodblock</button>
+        <button class="chip snd" data-snd="rim">Side stick</button>
+        <button class="chip snd" data-snd="cowbell">Cowbell</button>
+        <button class="chip snd" data-snd="blip">Low blip</button>
         <button class="chip snd" data-snd="beep">Beep</button>
+        <button class="chip snd" data-snd="click">Click</button>
       </div>
     </div>
 
@@ -496,6 +508,10 @@ textarea{min-height:110px; resize:vertical;}
     <div class="togglerow">
       <div><div class="tl">Flash on beat 1</div><div class="ts">Visual pulse for silent practice</div></div>
       <button class="switch" id="flashSw"></button>
+    </div>
+    <div class="togglerow">
+      <div><div class="tl">Accent pitch</div><div class="ts">Accented beats play a higher tone, not just louder</div></div>
+      <button class="switch" id="accentSw"></button>
     </div>
 
     <h2 style="font-size:16px; margin:22px 0 10px">Planning Center Connection</h2>
@@ -533,8 +549,10 @@ const $$ = (s) => Array.from(document.querySelectorAll(s));
 const state = {
   bpm: 120, beats: 4, denom: 4, subdiv: 1,
   accents: [2, 1, 1, 1],          // 2 accent, 1 normal, 0 mute
-  sound: "stick", vol: 0.8, muted: false,
-  dotted: false,                   // "6/8 in 2": BPM counts dotted quarters, not eighths   // mute is never persisted
+  sound: "stick", vol: 0.8, muted: false,   // mute is never persisted
+  weak: 0.5,                       // per song: weak-beat volume (1 = same as accents)
+  accentPitch: false,              // accents/subdivisions change pitch, not just volume
+  dotted: false,                   // "6/8 in 2": BPM counts dotted quarters, not eighths
   countIn: 1,                      // per-song: bars of spoken count (0/1/2)
   flash: false, wake: true,
   playing: false,
@@ -655,41 +673,84 @@ function initAudio() {
   silentEl.volume = 0.01;
 }
 
-function clickAt(t, kind) {         // kind: 2 accent, 1 beat, 0 subdivision
-  const level = kind === 2 ? 1.0 : kind === 1 ? 0.75 : 0.38;
-  if (state.sound === "stick" && stickBufs.n) {
-    const src = ctx.createBufferSource();
-    src.buffer = stickBufs[kind === 2 ? "a" : kind === 1 ? "n" : "s"] || stickBufs.n;
-    const g = ctx.createGain(); g.gain.value = level * 1.2;
-    src.connect(g); g.connect(bus);
-    src.start(t);
-  } else if (state.sound === "stick") {       // samples not decoded yet: synth fallback
-    const len = Math.floor(ctx.sampleRate * 0.05);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
-    const src = ctx.createBufferSource(); src.buffer = buf;
-    const f = ctx.createBiquadFilter(); f.type = "bandpass";
-    f.frequency.value = kind === 2 ? 2600 : kind === 1 ? 1800 : 1300; f.Q.value = 7;
-    const g = ctx.createGain(); g.gain.value = level * 1.6;
-    src.connect(f); f.connect(g); g.connect(bus);
-    src.start(t);
-  } else {
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    if (state.sound === "beep") {
-      o.type = "sine";
-      o.frequency.value = kind === 2 ? 1046 : kind === 1 ? 784 : 660;
-      g.gain.setValueAtTime(level * 0.9, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
-      o.start(t); o.stop(t + 0.1);
-    } else {                        // click
-      o.type = "square";
-      o.frequency.value = kind === 2 ? 1900 : kind === 1 ? 1250 : 950;
-      g.gain.setValueAtTime(level * 0.8, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.032);
-      o.start(t); o.stop(t + 0.045);
+let noiseBuf = null;
+function noise() {                  // 1 s of white noise, made once
+  if (!noiseBuf) {
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  return noiseBuf;
+}
+function decay(g, t, peak, dur) {   // instant attack, exponential tail
+  g.gain.setValueAtTime(peak, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+}
+function osc(type, freq, t, dur, dest) {
+  const o = ctx.createOscillator(); o.type = type; o.frequency.value = freq;
+  o.connect(dest); o.start(t); o.stop(t + dur + 0.02);
+  return o;
+}
+
+// kind: 2 accent, 1 weak beat, 0 subdivision.
+// Volume carries the accent; pitch only changes when "Accent pitch" is on.
+function clickAt(t, kind) {
+  const level = kind === 2 ? 1 : kind === 1 ? state.weak : state.weak * 0.56;   // subdivisions ~ -5 dB
+  const r = state.accentPitch ? [0.8, 1, 1.33][kind] : 1;
+  const out = ctx.createGain(); out.connect(bus);
+  switch (state.sound) {
+    case "stick": {
+      const buf = stickBufs.n && (state.accentPitch ? stickBufs["sna"[kind]] || stickBufs.n : stickBufs.n);
+      if (buf) {
+        const src = ctx.createBufferSource(); src.buffer = buf;
+        out.gain.value = level * 1.2; src.connect(out); src.start(t);
+      } else {                        // samples not decoded yet: synth fallback
+        const src = ctx.createBufferSource(); src.buffer = noise();
+        const f = ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 1800 * r; f.Q.value = 7;
+        decay(out, t, level * 1.6, 0.05);
+        src.connect(f); f.connect(out); src.start(t); src.stop(t + 0.06);
+      }
+      break;
     }
-    o.connect(g); g.connect(bus);
+    case "beep":
+      decay(out, t, level * 0.9, 0.09);
+      osc("sine", 784 * r, t, 0.09, out);
+      break;
+    case "blip": {                    // low, hollow, soft: easy on the ears
+      decay(out, t, level * 0.9, 0.13);
+      const o = osc("sine", 520 * r, t, 0.13, out);
+      o.frequency.setValueAtTime(600 * r, t);
+      o.frequency.exponentialRampToValueAtTime(520 * r, t + 0.03);
+      const h = ctx.createGain(); h.gain.value = 0.18; h.connect(out);
+      osc("triangle", 1040 * r, t, 0.05, h);
+      break;
+    }
+    case "wood": {                    // dry, punchy, cuts through a band
+      const f = ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 1000 * r; f.Q.value = 1.5;
+      f.connect(out); decay(out, t, level * 1.5, 0.06);
+      const a = ctx.createGain(); a.gain.value = 0.6; a.connect(f);
+      const b = ctx.createGain(); b.gain.value = 0.4; b.connect(f);
+      osc("sine", 800 * r, t, 0.06, a); osc("sine", 1250 * r, t, 0.06, b);
+      break;
+    }
+    case "cowbell": {
+      const f = ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 800 * r; f.Q.value = 3;
+      f.connect(out); decay(out, t, level * 0.7, 0.3);
+      osc("square", 540 * r, t, 0.3, f); osc("square", 800 * r, t, 0.3, f);
+      break;
+    }
+    case "rim": {                     // side stick: noise crack + short tone body
+      const n = ctx.createBufferSource(); n.buffer = noise();
+      const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 2000 * r;
+      const ng = ctx.createGain(); decay(ng, t, level * 0.66, 0.03);
+      n.connect(hp); hp.connect(ng); ng.connect(out); n.start(t); n.stop(t + 0.04);
+      const tg = ctx.createGain(); decay(tg, t, level * 0.36, 0.04); tg.connect(out);
+      osc("triangle", 1700 * r, t, 0.04, tg);
+      break;
+    }
+    default:                          // click
+      decay(out, t, level * 0.8, 0.032);
+      osc("square", 1250 * r, t, 0.032, out);
   }
 }
 
@@ -1319,6 +1380,7 @@ function loadSong(ix, opts = {}) {
   state.subdiv = s.subdiv ?? 1; sub = 0;
   $("#subSel").value = String(state.subdiv); updateSubChip();
   state.countIn = s.countIn ?? 1;
+  state.weak = s.weak ?? 0.5; updateWeakChip();
   updateCountChip();
   if (s.bpm) setBpm(s.bpm);
   else if (!opts.silent) toast("No BPM saved for this song — tap it in or nudge the slider");
@@ -1464,11 +1526,12 @@ function reflectSettings() {
   });
   $("#wakeSw").classList.toggle("on", state.wake);
   $("#flashSw").classList.toggle("on", state.flash);
+  $("#accentSw").classList.toggle("on", state.accentPitch);
   $("#pcoRelay").value = state.creds.relay;
 }
 function persistSettings() {
   store.set("settings", {
-    sound: state.sound, vol: state.vol, wake: state.wake, flash: state.flash,
+    sound: state.sound, vol: state.vol, wake: state.wake, flash: state.flash, accentPitch: state.accentPitch,
     bpm: state.bpm, beats: state.beats, denom: state.denom,
   });
 }
@@ -1488,6 +1551,8 @@ function updateSubChip() {
   const sel = $("#subSel");
   $("#subVal").textContent = sel.options[sel.selectedIndex]?.textContent || "";
 }
+
+function updateWeakChip() { $("#weakVal").textContent = state.weak === 1 ? "100%" : "50%"; }
 
 function updateCountChip() {
   const v = state.countIn;
@@ -1518,6 +1583,11 @@ function wire() {
   $("#subSel").addEventListener("change", (e) => {
     state.subdiv = +e.target.value; sub = 0; updateSubChip();
     saveSongProp({ subdiv: state.subdiv });
+  });
+  $("#weakChip").addEventListener("click", () => {
+    state.weak = state.weak === 1 ? 0.5 : 1;
+    updateWeakChip();
+    saveSongProp({ weak: state.weak });
   });
   $("#cntChip").addEventListener("click", () => {
     state.countIn = (state.countIn + 1) % 3;
@@ -1555,6 +1625,7 @@ function wire() {
     if (state.playing) state.wake ? requestWake() : releaseWake();
   });
   $("#flashSw").addEventListener("click", () => { state.flash = !state.flash; reflectSettings(); persistSettings(); });
+  $("#accentSw").addEventListener("click", () => { state.accentPitch = !state.accentPitch; reflectSettings(); persistSettings(); });
 
   $("#testBtn").addEventListener("click", async () => {
     persistCreds();
@@ -1595,6 +1666,7 @@ async function init() {
     if (settings.vol > 0) state.vol = settings.vol;   // never boot silent: a saved 0 falls back to default
     state.wake = settings.wake ?? state.wake;
     state.flash = settings.flash ?? state.flash;
+    state.accentPitch = settings.accentPitch ?? state.accentPitch;
     if (settings.beats) applyMeter(settings.beats + "/" + (settings.denom || 4));
     if (settings.bpm) setBpm(settings.bpm);
   }
