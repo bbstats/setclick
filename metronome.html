@@ -1424,19 +1424,28 @@ function dragReorder(e, handle, items, from, scroller, axis, { lift = "", onEnd 
   const place = () => {
     const d = p + scrolled() - p0, c = mids[from] + d;
     item.style.transform = (shiftBy(d) + " " + lift).trim();
-    to = mids.filter((m, i) => i !== from && m < c).length;
+    // A neighbour steps aside once the dragged item's center is halfway to its slot.
+    to = from + mids.filter((m, i) => i > from && c > m - pitch / 2).length
+              - mids.filter((m, i) => i < from && c < m + pitch / 2).length;
     items.forEach((r, i) => {
       if (i === from) return;
       r.style.transform = shiftBy(from < to && i > from && i <= to ? -pitch : to < from && i >= to && i < from ? pitch : 0);
     });
   };
-  const tick = () => {
-    // Scroll only once you've dragged toward that edge: songs peeking in at the
-    // edges start out inside the zone, and just holding one mustn't scroll.
+  // Edge scrolling is a deliberate second step: only after you've dragged toward an
+  // edge and rested there a moment, and slowly. Otherwise a slow drag just scrolls the list.
+  const EDGE = 48, DWELL_MS = 300;
+  let edgeSince = 0;
+  const tick = (now) => {
     const r = scroller.getBoundingClientRect(), lo = Y ? r.top : r.left, hi = Y ? r.bottom : r.right;
     const went = p - pStart;
-    const step = p < lo + 48 && went < -24 ? -8 : p > hi - 48 && went > 24 ? 8 : 0;
-    if (step) { if (Y) scroller.scrollTop += step; else scroller.scrollLeft += step; }
+    const depth = p < lo + EDGE && went < -24 ? p - (lo + EDGE) : p > hi - EDGE && went > 24 ? p - (hi - EDGE) : 0;
+    if (!depth) edgeSince = 0;
+    else if (!edgeSince) edgeSince = now;
+    else if (now - edgeSince > DWELL_MS) {
+      const step = Math.sign(depth) * Math.max(1, Math.min(4, Math.abs(depth) / 10));
+      if (Y) scroller.scrollTop += step; else scroller.scrollLeft += step;
+    }
     place();
     raf = requestAnimationFrame(tick);
   };
@@ -1446,11 +1455,16 @@ function dragReorder(e, handle, items, from, scroller, axis, { lift = "", onEnd 
     if (pt && mine(ev)) p = pos(pt);
   };
   const EVENTS = ["pointermove", "touchmove", "pointerup", "touchend", "touchcancel", "pointercancel"];
+  // While dragging, the finger moves the item, never the page. Registered on the document,
+  // non-passive, for the length of the drag: otherwise Android Chrome takes the gesture
+  // for scrolling (pointercancel) and stops sending moves.
+  const noPan = (ev) => { if (ev.cancelable) ev.preventDefault(); };
   const end = (ev) => {
     if (done || !mine(ev) || (touch && ev.type === "pointercancel")) return;   // touch: wait for touchend
     done = true;
     cancelAnimationFrame(raf);
     EVENTS.forEach((t) => window.removeEventListener(t, t.endsWith("move") ? move : end));
+    document.removeEventListener("touchmove", noPan);
     item.classList.remove("dragging");
     items.forEach((r) => { r.style.transform = ""; });
     if ((ev.type === "pointerup" || ev.type === "touchend") && to !== from)
@@ -1459,6 +1473,7 @@ function dragReorder(e, handle, items, from, scroller, axis, { lift = "", onEnd 
   };
   item.classList.add("dragging");
   try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+  document.addEventListener("touchmove", noPan, { passive: false });
   EVENTS.forEach((t) => window.addEventListener(t, t.endsWith("move") ? move : end, { passive: true }));
   raf = requestAnimationFrame(tick);
 }
@@ -1618,7 +1633,7 @@ function buildCarousel() {
 
 // Hold a card still for a moment, then drag it to move the song. Moving first is a
 // normal swipe; a quick tap still selects. Neither the hold nor the drop selects the card.
-const HOLD_MS = 400, HOLD_SLOP = 8;
+const HOLD_MS = 350, HOLD_SLOP = 10;         // ahead of Android's own ~500 ms long-press
 let cardDrag = false, eatClick = false;
 function holdToDrag(e) {
   if (e.button > 0 || cardDrag || state.set.songs.length < 2) return;
@@ -1626,10 +1641,14 @@ function holdToDrag(e) {
   const quit = () => {
     clearTimeout(timer);
     card.removeEventListener("pointermove", moved);
+    card.removeEventListener("touchmove", moved);
     card.removeEventListener("pointerup", quit);
     card.removeEventListener("pointercancel", quit);
   };
-  const moved = (ev) => { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > HOLD_SLOP) quit(); };
+  const moved = (ev) => {
+    const pt = ev.touches ? ev.touches[0] : ev;
+    if (pt && Math.hypot(pt.clientX - x0, pt.clientY - y0) > HOLD_SLOP) quit();
+  };
   const timer = setTimeout(() => {
     quit();
     const el = $("#carousel");
@@ -1646,6 +1665,7 @@ function holdToDrag(e) {
     dragReorder(e, card, $$("#carousel .card"), +card.dataset.ix, el, railMode() ? "y" : "x", { lift: "scale(1.06)", onEnd });
   }, HOLD_MS);
   card.addEventListener("pointermove", moved);
+  card.addEventListener("touchmove", moved, { passive: true });
   card.addEventListener("pointerup", quit);
   card.addEventListener("pointercancel", quit);
 }
@@ -1886,8 +1906,9 @@ function wire() {
   });
 
   $("#carousel").addEventListener("scroll", onCarouselScroll, { passive: true });
-  // While a card is being dragged the finger moves the card, not the carousel.
-  $("#carousel").addEventListener("touchmove", (e) => { if (cardDrag) e.preventDefault(); }, { passive: false });
+  // Chrome decides at touchstart whether it must wait for the page before scrolling;
+  // a blocking listener here from the start guarantees a lifted card can stop the pan.
+  $("#carousel").addEventListener("touchmove", (e) => { if (cardDrag && e.cancelable) e.preventDefault(); }, { passive: false });
   $("#carousel").addEventListener("click", (e) => {
     if (eatClick) { e.stopPropagation(); eatClick = false; }
   }, true);

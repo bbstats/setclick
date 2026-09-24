@@ -79,7 +79,7 @@ async function holdAndDrag(page, from, to) {
   await page.waitForTimeout(500);                            // hold
   const edge = to > from ? (rail ? box.y + box.height - 10 : box.x + box.width - 10) : (rail ? box.y + 10 : box.x + 10);
   await page.mouse.move(rail ? x : edge, rail ? edge : y, { steps: 10 });
-  await page.waitForTimeout(700);                            // let it scroll along if needed
+  await page.waitForTimeout(2000);                           // rest at the edge: the list carries it along
   await page.mouse.up();
 }
 
@@ -144,7 +144,30 @@ test.describe("hold a song on the main screen to move it", () => {
         return c && c.dataset.ix === "0" && c.style.transform.includes("scale");
       })).toBe(true);
       const edge = page.viewportSize().width - 15;
-      await touch(page, [...slide(x, y, edge - x, 12), ["touchMove", edge, y, 900], ["touchEnd"]]);
+      await touch(page, [...slide(x, y, edge - x, 12), ["touchMove", edge, y, 2000], ["touchEnd"]]);
+      expect(await titles(page)).toEqual(["King of Kings@136", "Build My Life@69", "Goodness of God@126"]);
+    });
+
+    test("slow drag: hold the highlighted song, ease it one card over, the strip stays put", async ({ page }) => {
+      const [x, y] = await center(page, 0);
+      await touch(page, [["touchStart", x, y, 100], ...holdStill(x, y, 500)]);
+      const before = await page.evaluate(() => document.querySelector("#carousel").scrollLeft);
+      const scrolls = [];
+      for (let i = 1; i <= 85; i++) {                               // ~2 px a frame, 170 px
+        await touch(page, [["touchMove", x + i * 2, y, 16]]);
+        if (i % 10 === 0) scrolls.push(await page.evaluate(() => document.querySelector("#carousel").scrollLeft));
+      }
+      expect(scrolls.every((v) => v === before)).toBe(true);
+      await touch(page, [["touchEnd", 0, 0, 100]]);
+      expect(await titles(page)).toEqual(["King of Kings@136", "Goodness of God@126", "Build My Life@69"]);
+      expect(await page.evaluate(() => state.set.songs[state.songIx].title)).toBe("Goodness of God");
+    });
+
+    test("two cards over: rest at the edge and the list carries it along", async ({ page }) => {
+      const [x, y] = await center(page, 0);
+      const edge = page.viewportSize().width - 15;
+      await touch(page, [["touchStart", x, y, 100], ...holdStill(x, y, 500), ...slide(x, y, edge - x, 20),
+                         ["touchMove", edge, y, 2000], ["touchEnd", 0, 0, 100]]);
       expect(await titles(page)).toEqual(["King of Kings@136", "Build My Life@69", "Goodness of God@126"]);
     });
 
@@ -162,7 +185,7 @@ test.describe("hold a song on the main screen to move it", () => {
       await page.evaluate(() => document.querySelector("#carousel .card.dragging")
         .dispatchEvent(new PointerEvent("pointercancel", { pointerType: "touch", pointerId: 1, bubbles: true })));
       const edge = page.viewportSize().width - 15;
-      await touch(page, [...slide(x + 40, y, edge - x - 40, 10), ["touchMove", edge, y, 900], ["touchEnd"]]);
+      await touch(page, [...slide(x + 40, y, edge - x - 40, 10), ["touchMove", edge, y, 2000], ["touchEnd"]]);
       expect(await titles(page)).toEqual(["King of Kings@136", "Build My Life@69", "Goodness of God@126"]);
     });
 
