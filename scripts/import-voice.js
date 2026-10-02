@@ -63,23 +63,23 @@ function hasFfmpeg() {
 }
 
 // -> mono Float32Array at SR
+// WAV is read here; anything else goes through ffmpeg into a float WAV at its own
+// channel count. (ffmpeg's own mono downmix adds the channels at 0.7 each, which
+// makes a stereo file look 3 dB hotter than it is and fakes clipping.)
 function decode(file) {
-  const x = decodeRaw(file);
-  if (peakOf(x) > 0.99) console.warn(`warning: ${file} is clipped (too loud for the mic), which sounds harsh. Back off the mic or turn the input down.`);
-  return x;
-}
-function decodeRaw(file) {
   if (!fs.existsSync(file)) die(`no such file: ${file}`);
-  if (hasFfmpeg()) {
+  let w = readWav(fs.readFileSync(file));
+  if (!w) {
+    if (!hasFfmpeg()) die(`${file}: can't read this format without ffmpeg — install ffmpeg, or export the recording as WAV`);
     let raw;
     try {
-      raw = execFileSync("ffmpeg", ["-v", "error", "-i", file, "-ac", "1", "-ar", String(SR), "-f", "f32le", "-"],
+      raw = execFileSync("ffmpeg", ["-v", "error", "-i", file, "-c:a", "pcm_f32le", "-f", "wav", "-"],
         { maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "pipe"] });
     } catch (e) { die(`${file}: ffmpeg couldn't read it (${String(e.stderr || e.message).trim().split("\n").pop()})`); }
-    return new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.length));
+    w = readWav(raw);
+    if (!w) die(`${file}: couldn't decode the audio`);
   }
-  const w = readWav(fs.readFileSync(file));
-  if (!w) die(`${file}: can't read this format without ffmpeg — install ffmpeg, or export the recording as WAV`);
+  if (w.peak > 0.99) console.warn(`warning: ${file} is clipped (too loud for the mic), which sounds harsh. Back off the mic or turn the input down.`);
   return resample(w.data, w.sr, SR);
 }
 
@@ -102,19 +102,23 @@ function readWav(buf) {
         : fmt.bits === 8 ? (o) => (buf[o] - 128) / 128 : null;
       if (!read) return null;
       const data = new Float32Array(frames);
+      let peak = 0;
       for (let i = 0; i < frames; i++) {
         let s = 0;
-        for (let c = 0; c < fmt.ch; c++) s += read(body + (i * fmt.ch + c) * bps);
+        for (let c = 0; c < fmt.ch; c++) {
+          const v = read(body + (i * fmt.ch + c) * bps);
+          s += v; peak = Math.max(peak, Math.abs(v));
+        }
         data[i] = s / fmt.ch;
       }
-      return { sr: fmt.sr, data };
+      return { sr: fmt.sr, data, peak };
     }
     off = body + len + (len & 1);
   }
   return null;
 }
 
-// Windowed-sinc resampler (only used when ffmpeg isn't around, or for --pitch in the preview).
+// Windowed-sinc resampler: recording rate -> SR, and --pitch in the preview.
 function resample(x, from, to) {
   if (from === to) return Float32Array.from(x);
   const ratio = to / from, n = Math.floor(x.length * ratio);
