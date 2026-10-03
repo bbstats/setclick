@@ -126,13 +126,13 @@ test("every synth sound is audible and doesn't clip", async ({ page }) => {
     const out = {};
     for (const snd of ["wood", "rim", "cowbell", "blip", "beep", "click"]) {
       const off = new OfflineAudioContext(1, 22050, 44100);
-      const saved = [ctx, bus, noiseBuf];
-      ctx = off; bus = off.createGain(); bus.connect(off.destination); noiseBuf = null;
+      const saved = [ctx, clickBus, noiseBuf];
+      ctx = off; clickBus = off.createGain(); clickBus.connect(off.destination); noiseBuf = null;
       state.sound = snd;
       clickAt(0.01, 2);
       const d = (await off.startRendering()).getChannelData(0);
       out[snd] = d.reduce((m, x) => Math.max(m, Math.abs(x)), 0);
-      [ctx, bus, noiseBuf] = saved;
+      [ctx, clickBus, noiseBuf] = saved;
     }
     return out;
   });
@@ -140,4 +140,32 @@ test("every synth sound is audible and doesn't clip", async ({ page }) => {
     expect(peak, snd).toBeGreaterThan(0.3);
     expect(peak, snd).toBeLessThanOrEqual(1);
   }
+});
+
+test("click and voice have their own volume and mute, and both volumes survive a reload", async ({ page }) => {
+  await initAudio(page);
+  const levels = () => page.evaluate(() => new Promise((ok) =>
+    setTimeout(() => ok([+clickBus.gain.value.toFixed(2), +voiceBus.gain.value.toFixed(2)]), 150)));
+  expect(await levels()).toEqual([0.8, 0.8]);
+  await page.fill("#voiceSlider", "40");
+  await page.fill("#volSlider", "60");
+  expect(await levels()).toEqual([0.6, 0.4]);
+  await page.click("#voiceMuteBtn");
+  expect(await levels()).toEqual([0.6, 0]);
+  expect(await page.textContent("#voicePct")).toBe("Muted");
+  await page.click("#muteBtn");
+  await page.click("#voiceMuteBtn");
+  expect(await levels()).toEqual([0, 0.4]);
+  await page.evaluate(() => persistSettings());
+  await page.reload();
+  await open(page);
+  expect(await page.evaluate(() => [state.vol, state.voiceVol, state.muted, state.voiceMuted])).toEqual([0.6, 0.4, false, false]);
+});
+
+test("the voice starts at the old single volume for settings saved before the voice knob", async ({ page }) => {
+  await page.addInitScript(() =>      // before the app loads: a reload saves the current settings on the way out
+    localStorage.setItem("setclick:settings", JSON.stringify({ sound: "click", vol: 0.5 })));
+  await page.reload();
+  await open(page);
+  expect(await page.evaluate(() => [state.vol, state.voiceVol])).toEqual([0.5, 0.5]);
 });
