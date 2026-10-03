@@ -26,3 +26,24 @@ npm run screenshots               # iPad/iPhone screenshots into screenshots/
 ```
 
 Tests also run on every pull request (GitHub Actions).
+
+## Recording your own count-in voice
+
+The spoken count-in is 12 short clips embedded in `metronome.html`. To use your own voice:
+
+1. Record yourself saying **"one" through "twelve"** in one take. The app counts up to 12 in 7/8, 9/8 and 12/8.
+   - Leave about **half a second of silence** between words.
+   - Say them short and even, the way you'd count off a band. Don't stress "one"; the app does that.
+   - Use a quiet room with the mic about a hand-span away, and keep the level out of the red. A phone voice memo is fine.
+2. Convert it:
+
+   ```sh
+   node scripts/import-voice.js my-count.m4a      # WAV works as is; m4a/mp3 need ffmpeg
+   ```
+
+   This splits the take into words, trims and levels them, and finds where each vowel starts, so the word lands on the click. It then rewrites the voice in `metronome.html`.
+3. Listen to `voice-preview/count-in.wav` (count-ins mixed against a click), then commit `metronome.html`.
+
+The recording behind the current voice is `voice/count-in.wav`, so you can re-import it with different options.
+
+Options: `--numbers 1-6` if you only recorded some numbers (counts past them are clicks only), `--pitch N` to shift the voice N semitones, `--rate 16000` to halve the size at the cost of crisp "s" and "t" sounds (the default 32000 keeps them), and `--dry-run` to write the preview without touching the app.
