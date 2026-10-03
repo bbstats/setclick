@@ -17,6 +17,8 @@
                        Numbers you leave out are dropped from the app, so a
                        count past them is clicks only.
      --pitch N         semitones the app shifts the voice (default 0)
+     --rate HZ         sample rate of the stored clips (default 32000; 16000
+                       halves the size but dulls "s", "t" and "f")
      --dry-run         write the preview only; leave metronome.html alone
      --preview DIR     where the preview goes (default voice-preview)
 
@@ -27,18 +29,19 @@ const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
 
-const SR = 16000;                    // what the embedded clips use
+const SR = 16000;                    // analysis rate: splitting and vowel onsets are tuned at this rate
 const PEAK = 0.92;
 const HTML = path.join(__dirname, "..", "metronome.html");
 
 /* ---------------- args ---------------- */
 const args = process.argv.slice(2);
-const opt = { numbers: "1-12", pitch: 0, dryRun: false, preview: "voice-preview" };
+const opt = { numbers: "1-12", pitch: 0, rate: 32000, dryRun: false, preview: "voice-preview" };
 const files = [];
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === "--numbers") opt.numbers = args[++i];
   else if (a === "--pitch") opt.pitch = Number(args[++i]);
+  else if (a === "--rate") opt.rate = Number(args[++i]);
   else if (a === "--dry-run") opt.dryRun = true;
   else if (a === "--preview") opt.preview = args[++i];
   else if (a === "-h" || a === "--help") { usage(); process.exit(0); }
@@ -51,9 +54,11 @@ if (!range || +range[1] < 1 || +range[2] > 12 || +range[1] > +range[2]) die("--n
 const NUMS = [];
 for (let n = +range[1]; n <= +range[2]; n++) NUMS.push(n);
 if (!Number.isFinite(opt.pitch) || Math.abs(opt.pitch) > 12) die("--pitch wants semitones, -12 to 12");
+if (!Number.isInteger(opt.rate) || opt.rate < 16000 || opt.rate > 48000) die("--rate wants a sample rate from 16000 to 48000");
+const OUT = opt.rate;                // rate of the stored clips
 
 function usage() {
-  console.log("usage: node scripts/import-voice.js <recording> [more files] [--numbers 1-12] [--pitch 0] [--dry-run]");
+  console.log("usage: node scripts/import-voice.js <recording> [more files] [--numbers 1-12] [--pitch 0] [--rate 32000] [--dry-run]");
 }
 function die(msg) { console.error("import-voice: " + msg); process.exit(1); }
 
@@ -62,7 +67,7 @@ function hasFfmpeg() {
   try { execFileSync("ffmpeg", ["-version"], { stdio: "ignore" }); return true; } catch { return false; }
 }
 
-// -> mono Float32Array at SR
+// -> { sr, data }: mono, at the recording's own rate
 // WAV is read here; anything else goes through ffmpeg into a float WAV at its own
 // channel count. (ffmpeg's own mono downmix adds the channels at 0.7 each, which
 // makes a stereo file look 3 dB hotter than it is and fakes clipping.)
@@ -80,7 +85,7 @@ function decode(file) {
     if (!w) die(`${file}: couldn't decode the audio`);
   }
   if (w.peak > 0.99) console.warn(`warning: ${file} is clipped (too loud for the mic), which sounds harsh. Back off the mic or turn the input down.`);
-  return resample(w.data, w.sr, SR);
+  return { sr: w.sr, data: w.data };
 }
 
 function readWav(buf) {
@@ -118,7 +123,7 @@ function readWav(buf) {
   return null;
 }
 
-// Windowed-sinc resampler: recording rate -> SR, and --pitch in the preview.
+// Windowed-sinc resampler: recording rate -> SR and OUT, and --pitch in the preview.
 function resample(x, from, to) {
   if (from === to) return Float32Array.from(x);
   const ratio = to / from, n = Math.floor(x.length * ratio);
@@ -139,8 +144,8 @@ function resample(x, from, to) {
 }
 
 // RBJ high-pass, run forward: removes DC, handling noise and mic rumble.
-function highpass(x, f0) {
-  const w = 2 * Math.PI * f0 / SR, q = Math.SQRT1_2, al = Math.sin(w) / (2 * q), cw = Math.cos(w);
+function highpass(x, f0, rate) {
+  const w = 2 * Math.PI * f0 / rate, q = Math.SQRT1_2, al = Math.sin(w) / (2 * q), cw = Math.cos(w);
   const a0 = 1 + al, b0 = (1 + cw) / 2 / a0, b1 = -(1 + cw) / a0, b2 = b0, a1 = -2 * cw / a0, a2 = (1 - al) / a0;
   const y = new Float32Array(x.length);
   let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
@@ -231,7 +236,8 @@ function vowelOnset(clip) {
 /* ---------------- shaping & output ---------------- */
 // Cut one word out: at most PRE of consonant before the vowel (longer is a breath
 // or a bump, which would play ahead of the beat), at most 0.8 s overall.
-function shape(x, { a, b, edge }) {
+// Works on the analysis signal; returns the span in seconds.
+function trim(x, { a, b, edge }) {
   const PRE = 0.16, HOP = SR / 100;
   a = Math.round(a); b = Math.round(b);
   const on = a + Math.round(vowelOnset(x.slice(a, b)) * SR);
@@ -240,8 +246,11 @@ function shape(x, { a, b, edge }) {
     while (s - HOP >= a && on - s < PRE * SR && rmsOf(x, s - HOP, s) > edge) s -= HOP;
     a = Math.max(a, s - Math.round(SR * 0.005));
   }
-  const clip = x.slice(a, Math.min(b, a + Math.round(SR * 0.8)));
-  const fin = Math.round(SR * 0.003), fout = Math.min(Math.round(SR * 0.03), clip.length >> 2);
+  return { a: a / SR, b: Math.min(b, a + Math.round(SR * 0.8)) / SR };
+}
+function cut(x, { a, b }, rate) {
+  const clip = x.slice(Math.round(a * rate), Math.round(b * rate));
+  const fin = Math.round(rate * 0.003), fout = Math.min(Math.round(rate * 0.03), clip.length >> 2);
   for (let i = 0; i < fin; i++) clip[i] *= i / fin;
   for (let i = 0; i < fout; i++) clip[clip.length - 1 - i] *= i / fout;
   return clip;
@@ -253,11 +262,11 @@ function rmsOf(x, a, b) {
   return Math.sqrt(e / Math.max(1, b - a));
 }
 
-function wav16(x) {
+function wav16(x, rate) {
   const buf = Buffer.alloc(44 + x.length * 2);
   buf.write("RIFF", 0); buf.writeUInt32LE(36 + x.length * 2, 4); buf.write("WAVEfmt ", 8);
   buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
-  buf.writeUInt32LE(SR, 24); buf.writeUInt32LE(SR * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+  buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
   buf.write("data", 36); buf.writeUInt32LE(x.length * 2, 40);
   for (let i = 0; i < x.length; i++) buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(x[i] * 32767))), 44 + i * 2);
   return buf;
@@ -266,7 +275,7 @@ function wav16(x) {
 // Count-ins mixed the way the app plays them (speakAt in metronome.html), with a plain click.
 function renderPreview(clips, leads) {
   const rate = Math.pow(2, opt.pitch / 12);
-  const shifted = clips.map((c) => resample(c, SR * rate, SR));      // played faster = higher
+  const shifted = clips.map((c) => resample(c, OUT * rate, OUT));      // played faster = higher
   const parts = [[100, [1, 2, 3, 4]], [150, [1, 2, 3, 4]], [126, NUMS]];
   const events = [];
   let t = 0.3;
@@ -278,15 +287,15 @@ function renderPreview(clips, leads) {
     }
     t += 0.8;
   }
-  const out = new Float32Array(Math.ceil((t + 0.5) * SR));
+  const out = new Float32Array(Math.ceil((t + 0.5) * OUT));
   for (const e of events) {
-    const at = Math.round(e.t * SR);
-    for (let i = 0; i < SR * 0.02; i++) out[at + i] += 0.3 * Math.sin(2 * Math.PI * (e.accent ? 1600 : 1000) * i / SR) * (1 - i / (SR * 0.02));
+    const at = Math.round(e.t * OUT);
+    for (let i = 0; i < OUT * 0.02; i++) out[at + i] += 0.3 * Math.sin(2 * Math.PI * (e.accent ? 1600 : 1000) * i / OUT) * (1 - i / (OUT * 0.02));
     const k = NUMS.indexOf(e.n);
     if (k < 0) continue;
     const src = shifted[k], lead = leads[k] / rate;
-    const st = Math.round((e.t - lead) * SR), vol = (e.accent ? 1.6 : 1.05) * 0.5;
-    const dur = Math.min(src.length, Math.round((lead + e.gap * 0.92) * SR)), fade = Math.round(SR * 0.03);
+    const st = Math.round((e.t - lead) * OUT), vol = (e.accent ? 1.6 : 1.05) * 0.5;
+    const dur = Math.min(src.length, Math.round((lead + e.gap * 0.92) * OUT)), fade = Math.round(OUT * 0.03);
     for (let i = 0; i < dur; i++) {
       const g = dur < src.length && i > dur - fade ? (dur - i) / fade : 1;
       if (st + i >= 0) out[st + i] += src[i] * vol * g;
@@ -298,22 +307,27 @@ function renderPreview(clips, leads) {
 }
 
 /* ---------------- main ---------------- */
-let clips;
+// Find words and onsets at SR (what the detection is tuned for); cut the stored clips at OUT.
+function load(f) {
+  const w = decode(f);
+  return { a: highpass(resample(w.data, w.sr, SR), 70, SR), o: highpass(resample(w.data, w.sr, OUT), 70, OUT) };
+}
+let parts;
 if (files.length === 1) {
-  const x = highpass(decode(files[0]), 70);
-  clips = splitWords(x, NUMS.length, files[0]).map((r) => shape(x, r));
+  const x = load(files[0]);
+  parts = splitWords(x.a, NUMS.length, files[0]).map((r) => ({ x, span: trim(x.a, r) }));
 } else {
   if (files.length !== NUMS.length) die(`got ${files.length} files for ${NUMS.length} numbers (${opt.numbers})`);
-  clips = files.map((f) => {
-    const x = highpass(decode(f), 70);
-    const r = splitWords(x, 1, f);
-    return shape(x, r[0]);
+  parts = files.map((f) => {
+    const x = load(f);
+    return { x, span: trim(x.a, splitWords(x.a, 1, f)[0]) };
   });
 }
 
-const leads = clips.map(vowelOnset);
+const leads = parts.map(({ x, span }) => vowelOnset(cut(x.a, span, SR)));
+let clips = parts.map(({ x, span }) => cut(x.o, span, OUT));
 // Even out loudness: match the vowels' level, but never push a word past PEAK.
-const vowelRms = clips.map((c, i) => rmsOf(c, Math.round(leads[i] * SR), Math.round((leads[i] + 0.15) * SR)));
+const vowelRms = clips.map((c, i) => rmsOf(c, Math.round(leads[i] * OUT), Math.round((leads[i] + 0.15) * OUT)));
 const target = percentile(clips.map((c, i) => vowelRms[i] * PEAK / peakOf(c)), 0.5);
 clips = clips.map((c, i) => {
   const g = Math.min(PEAK / peakOf(c), target / vowelRms[i]);
@@ -322,21 +336,21 @@ clips = clips.map((c, i) => {
 
 console.log(" #   length   vowel at   level");
 clips.forEach((c, i) => console.log(
-  `${String(NUMS[i]).padStart(2)}   ${fmtT(c.length / SR).padStart(6)}   ${fmtT(leads[i]).padStart(8)}   ${dB(peakOf(c)).toFixed(1).padStart(5)} dB`));
-const long = clips.map((c, i) => [NUMS[i], c.length / SR]).filter(([, d]) => d > 0.6);
+  `${String(NUMS[i]).padStart(2)}   ${fmtT(c.length / OUT).padStart(6)}   ${fmtT(leads[i]).padStart(8)}   ${dB(peakOf(c)).toFixed(1).padStart(5)} dB`));
+const long = clips.map((c, i) => [NUMS[i], c.length / OUT]).filter(([, d]) => d > 0.6);
 if (long.length) console.warn(`note: ${long.map(([n]) => n).join(", ")} ran long. Fast count-ins cut words off anyway, but short, punchy words sound tighter.`);
 const late = leads.map((l, i) => [NUMS[i], l]).filter(([, l]) => l > 0.2);
 if (late.length) console.warn(`note: the vowel starts late in ${late.map(([n]) => n).join(", ")} — check the preview; a breath or noise before the word can do this.`);
 
 fs.mkdirSync(opt.preview, { recursive: true });
-clips.forEach((c, i) => fs.writeFileSync(path.join(opt.preview, `${NUMS[i]}.wav`), wav16(c)));
-fs.writeFileSync(path.join(opt.preview, "count-in.wav"), wav16(renderPreview(clips, leads)));
+clips.forEach((c, i) => fs.writeFileSync(path.join(opt.preview, `${NUMS[i]}.wav`), wav16(c, OUT)));
+fs.writeFileSync(path.join(opt.preview, "count-in.wav"), wav16(renderPreview(clips, leads), OUT));
 console.log(`\nPreview: ${path.join(opt.preview, "count-in.wav")} (1-2-3-4 at 100 and 150 BPM, then every number at 126 BPM)`);
 
 if (opt.dryRun) { console.log("Dry run: metronome.html not changed."); process.exit(0); }
 
 let html = fs.readFileSync(HTML, "utf8");
-const b64 = "{" + clips.map((c, i) => `"${NUMS[i]}": "${wav16(c).toString("base64")}"`).join(", ") + "}";
+const b64 = "{" + clips.map((c, i) => `"${NUMS[i]}": "${wav16(c, OUT).toString("base64")}"`).join(", ") + "}";
 const lead = "{" + leads.map((l, i) => `"${NUMS[i]}": ${+l.toFixed(3)}`).join(", ") + "}";
 const swap = (re, line, what) => {
   if (!re.test(html)) die(`couldn't find ${what} in metronome.html`);

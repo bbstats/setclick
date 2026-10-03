@@ -44,4 +44,4 @@ The spoken count-in is 12 short clips embedded in `metronome.html`. To use your 
    This splits the take into words, trims and levels them, and finds where each vowel starts, so the word lands on the click. It then rewrites the voice in `metronome.html`.
 3. Listen to `voice-preview/count-in.wav` (count-ins mixed against a click), then commit `metronome.html`.
 
-Options: `--numbers 1-6` if you only recorded some numbers (counts past them are clicks only), `--pitch N` to shift the voice N semitones, and `--dry-run` to write the preview without touching the app.
+Options: `--numbers 1-6` if you only recorded some numbers (counts past them are clicks only), `--pitch N` to shift the voice N semitones, `--rate 16000` to halve the size at the cost of crisp "s" and "t" sounds (the default 32000 keeps them), and `--dry-run` to write the preview without touching the app.
