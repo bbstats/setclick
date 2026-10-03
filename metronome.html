@@ -633,6 +633,7 @@ function loadVoices() {
   Object.entries(VOICE_B64).forEach(([n, b]) => decodeB64(b, (buf) => { voiceBufs[n] = buf; }));
   Object.entries(STICK_B64).forEach(([k, b]) => decodeB64(b, (buf) => { stickBufs[k] = buf; }));
 }
+const VOICE_GAIN = 0.9;                      // voice level relative to the clips' full scale
 const VOICE_PITCH_ST = 0;                    // semitones over the recording (scripts/import-voice.js --pitch)
 function speakAt(t, n, accented, gap) {
   const buf = voiceBufs[String(n)];
@@ -644,7 +645,7 @@ function speakAt(t, n, accented, gap) {
   const src = ctx.createBufferSource(); src.buffer = buf;
   src.playbackRate.value = rate;
   const g = ctx.createGain();
-  const vol = accented ? 1.6 : 1.05;         // "ONE, two, three, four"
+  const vol = (accented ? 1.6 : 1.05) * VOICE_GAIN;   // "ONE, two, three, four"
   const dur = Math.min(buf.duration / rate, lead + gap * 0.92);
   g.gain.setValueAtTime(vol, st);
   if (dur < buf.duration / rate) {
