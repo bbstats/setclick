@@ -189,6 +189,23 @@ test.describe("hold a song on the main screen to move it", () => {
       expect(await titles(page)).toEqual(["King of Kings@136", "Build My Life@69", "Goodness of God@126"]);
     });
 
+    test("a swipe right after a song change still loads the song it lands on", async ({ page }) => {
+      await page.evaluate(() => { state.set.songs[2].meter = "6/8"; buildCarousel(); });
+      const [, y] = await center(page, 0);
+      const x = page.viewportSize().width / 2;
+      // Swipes at different moments of NEXT's smooth scroll (one of these used to land on
+      // the 6/8 song while the app kept playing the 4/4 one).
+      for (const [wait, steps, dx] of [[150, 4, -240], [200, 6, -300], [250, 4, -240], [350, 3, -220]]) {
+        await page.evaluate(() => loadSong(0, { instant: true }));
+        await page.waitForTimeout(500);
+        await page.evaluate(() => loadSong(1));
+        await page.waitForTimeout(wait);
+        await touch(page, [["touchStart", x, y, 16], ...slide(x, y, dx, steps), ["touchEnd", 0, 0, 1000]]);
+        const [shown, playing, beats] = await page.evaluate(() => [nearestCardIx(), state.songIx, state.beats]);
+        expect([wait, playing, beats]).toEqual([wait, shown, shown === 2 ? 6 : 4]);   // what you see is what plays
+      }
+    });
+
     test("a quick swipe just browses", async ({ page }) => {
       const [x, y] = await center(page, 0);
       await touch(page, [["touchStart", x, y, 30], ...slide(x, y, -160, 8), ["touchEnd", 0, 0, 600]]);

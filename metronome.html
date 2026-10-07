@@ -1937,6 +1937,10 @@ function wire() {
   });
 
   $("#carousel").addEventListener("scroll", onCarouselScroll, { passive: true });
+  // A finger or wheel on the carousel takes over from a programmatic scroll still in
+  // flight: otherwise a swipe made right after NEXT could land on a song that never loads.
+  const userScroll = () => { if (!cardDrag) { clearTimeout(suppressT); suppressCarousel = false; } };
+  ["touchstart", "pointerdown", "wheel"].forEach((t) => $("#carousel").addEventListener(t, userScroll, { passive: true }));
   // Chrome decides at touchstart whether it must wait for the page before scrolling;
   // a blocking listener here from the start guarantees a lifted card can stop the pan.
   $("#carousel").addEventListener("touchmove", (e) => { if (cardDrag && e.cancelable) e.preventDefault(); }, { passive: false });
