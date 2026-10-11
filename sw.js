@@ -1,8 +1,10 @@
 /* SetClick service worker: makes the app open with no network.
-   Same-origin files are served from cache and refreshed in the background,
-   so an update shows up on the launch after it's published.
+   The app page is served from cache and only replaced by checkUpdate(), which the
+   page calls on launch: that way the page can say "update available" when it was.
+   Other same-origin files are served from cache and refreshed in the background.
    Planning Center calls go to the relay (another origin) and are never cached. */
 const CACHE = "setclick-v1";
+const PAGE = "metronome.html";
 const PRECACHE = [
   "metronome.html",
   "manifest.webmanifest",
@@ -23,11 +25,28 @@ self.addEventListener("activate", (e) => {
     .then(() => self.clients.claim()));
 });
 
+// Fetch the page past every cache; if it differs from the cached copy (the one the
+// open app is running), store it and answer "updated". Otherwise "same" (or "offline").
+async function checkUpdate() {
+  const c = await caches.open(CACHE), url = new URL(PAGE, self.registration.scope).href;
+  let res;
+  try { res = await fetch(url, { cache: "no-cache" }); } catch (err) { return new Response("offline"); }
+  if (!res.ok) return new Response("offline");
+  const old = await c.match(url);
+  const [fresh, cur] = await Promise.all([res.clone().text(), old ? old.text() : null]);
+  if (fresh === cur) return new Response("same");
+  await c.put(url, res);
+  return new Response(cur === null ? "same" : "updated");      // first copy: nothing to update from
+}
+
 self.addEventListener("fetch", (e) => {
-  const req = e.request;
-  if (req.method !== "GET" || new URL(req.url).origin !== location.origin) return;
+  const req = e.request, url = new URL(req.url);
+  if (req.method !== "GET" || url.origin !== location.origin) return;
+  const isPage = url.pathname.endsWith("/" + PAGE);
+  if (isPage && url.searchParams.has("check-update")) { e.respondWith(checkUpdate()); return; }
   e.respondWith(caches.open(CACHE).then(async (c) => {
     const hit = await c.match(req, { ignoreSearch: true });
+    if (hit && isPage) return hit;             // replaced only by checkUpdate()
     const net = fetch(req).then((res) => {
       if (res.ok) e.waitUntil(c.put(req, res.clone()).catch(() => {}));   // full storage, partial response…
       return res;

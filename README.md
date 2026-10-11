@@ -3,7 +3,7 @@ Planning-Center integrated metronome application
 
 <img width="1595" height="899" alt="image" src="https://github.com/user-attachments/assets/b8e304ff-5fab-474c-b530-7594db7a3307" />
 
-The app is `metronome.html`, with no build step. Host the repo anywhere static over HTTPS (for example GitHub Pages), open it on a phone or iPad, and add it to the home screen. After the first visit it works offline: `sw.js` caches the app, and your last-loaded set is kept on the device. Updates show up on the launch after they're published.
+The app is `metronome.html`, with no build step. Host the repo anywhere static over HTTPS (for example GitHub Pages), open it on a phone or iPad, and add it to the home screen. After the first visit it works offline: `sw.js` caches the app, and your last-loaded set is kept on the device. When an update is published, the app shows an "Update available" bar the next time it opens or comes back to the front; tap it to reload.
 
 ## Setup
 
