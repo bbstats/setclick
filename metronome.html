@@ -324,6 +324,14 @@ textarea{min-height:110px; resize:vertical;}
   opacity:0; pointer-events:none; transition:all .22s; z-index:99; max-width:88vw; text-align:center;
 }
 #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+#updateBar{
+  position:fixed; left:50%; top:calc(var(--sat) + 8px); transform:translateX(-50%); z-index:98;
+  display:flex; align-items:center; gap:8px; white-space:nowrap; max-width:calc(100vw - 32px);
+  background:var(--amber); color:#1a1205; border-radius:999px; padding:10px 18px;
+  font-size:14px; font-weight:800; box-shadow:0 6px 24px rgba(0,0,0,.5);
+}
+#updateBar[hidden]{display:none;}
+#updateBar span{font-weight:600; opacity:.75;}
 #flash{position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:5;}
 #flash.go{animation:fl .1s ease-out;}
 @keyframes fl{from{opacity:.22;} to{opacity:0;}}
@@ -563,6 +571,7 @@ textarea{min-height:110px; resize:vertical;}
 </div>
 
 <div id="toast"></div>
+<button id="updateBar" hidden>Update available <span>· Tap to reload</span></button>
 <div id="flash"></div>
 
 <script>
@@ -977,6 +986,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     if (state.playing) requestWake();
     if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
+    checkForUpdate();                          // back from the background: anything new?
   }
 });
 
@@ -1887,7 +1897,22 @@ function updateTransport() {
   const b = $("#playBtn");
   b.classList.toggle("playing", state.playing);
   b.innerHTML = state.playing ? "&#9632;&nbsp; STOP" : "&#9654;&nbsp; START";
+  showUpdateBar();
 }
+
+/* ---------------- app updates ---------------- */
+// The service worker fetches the newest page and says whether it differs from the
+// one running. The bar stays out of the way while playing: a reload stops the click.
+let updateReady = false, lastUpdateCheck = 0;
+async function checkForUpdate() {
+  if (updateReady || !navigator.serviceWorker?.controller || Date.now() - lastUpdateCheck < 60000) return;
+  lastUpdateCheck = Date.now();
+  try {
+    const r = await fetch("metronome.html?check-update", { cache: "no-store" });
+    if ((await r.text()) === "updated") { updateReady = true; showUpdateBar(); }
+  } catch (e) {}                               // offline: try again next time
+}
+function showUpdateBar() { $("#updateBar").hidden = !updateReady || state.playing; }
 
 function updateSubChip() {
   const sel = $("#subSel");
@@ -1904,6 +1929,7 @@ function updateCountChip() {
 
 function wire() {
   $("#playBtn").addEventListener("click", toggle);
+  $("#updateBar").addEventListener("click", () => { persistSettings(); location.reload(); });
   $("#nextBtn").addEventListener("click", nextSongAndGo);
   const onRotate = () => {
     updateCarouselActive();
@@ -2028,7 +2054,8 @@ async function init() {
   reflectSettings(); applyVolume();
   syncPco(state.set);                          // pick up Planning Center changes if online
   if ("serviceWorker" in navigator && location.protocol.startsWith("http"))
-    navigator.serviceWorker.register("sw.js").catch(() => {});   // offline support
+    navigator.serviceWorker.register("sw.js").then(() => navigator.serviceWorker.ready)
+      .then(() => setTimeout(checkForUpdate, 1000)).catch(() => {});   // offline support + updates
   window.addEventListener("pagehide", persistSettings);
 }
 init();
