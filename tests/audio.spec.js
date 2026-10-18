@@ -169,3 +169,17 @@ test("the voice starts at the old single volume for settings saved before the vo
   await open(page);
   expect(await page.evaluate(() => [state.vol, state.voiceVol])).toEqual([0.5, 0.5]);
 });
+
+test("output channel pans audio Left, Both, Right and persists across reload", async ({ page }) => {
+  await initAudio(page);
+  expect(await page.evaluate(() => [state.pan, panner.pan.value])).toEqual(["both", 0]);
+  await page.click("#settingsBtn");
+  await page.click('.pan[data-pan="left"]');
+  expect(await page.evaluate(() => [state.pan, panner.pan.value])).toEqual(["left", -1]);
+  await page.click('.pan[data-pan="right"]');
+  expect(await page.evaluate(() => [state.pan, panner.pan.value])).toEqual(["right", 1]);
+  await page.reload();
+  await open(page);
+  await initAudio(page);
+  expect(await page.evaluate(() => [state.pan, panner.pan.value])).toEqual(["right", 1]);
+});

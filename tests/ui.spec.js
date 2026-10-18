@@ -23,6 +23,10 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
       const chipsFit = await page.evaluate(() => [...document.querySelectorAll(".btnrow .chip")]
         .every((c) => c.scrollWidth <= c.clientWidth + 1));
       expect(chipsFit).toBe(true);
+      await page.selectOption("#sigSel", "12/8 in 4");
+      const chipsFit12 = await page.evaluate(() => [...document.querySelectorAll(".btnrow .chip")]
+        .every((c) => c.scrollWidth <= c.clientWidth + 1));
+      expect(chipsFit12).toBe(true);
       await page.selectOption("#sigSel", "12/8");
       const [lampsBottom, sliderTop] = await page.evaluate(() =>
         [document.querySelector("#lamps").getBoundingClientRect().bottom,
@@ -87,4 +91,35 @@ test("a one-song set says 1 song", async ({ page }) => {
   await open(page);
   await page.evaluate(() => useSet({ id: "manual:1", name: "Solo", songs: parseManual("Way Maker 68") }));
   await expect(page.locator("#setPillText")).toHaveText("Solo · 1 song");
+});
+
+test("tempo control bar has a BPM label", async ({ page }) => {
+  await open(page);
+  const label = page.locator(".bpm-bar-label");
+  await expect(label).toBeVisible();
+  await expect(label).toContainText("BPM");
+});
+
+test("volume sliders have CLICK and VOICE labels", async ({ page }) => {
+  await open(page);
+  await expect(page.locator("#volRow .vollbl")).toHaveText("CLICK");
+  await expect(page.locator("#voiceRow .vollbl")).toHaveText("VOICE");
+});
+
+test("time signature chip shows METER eyebrow and updates #sigVal", async ({ page }) => {
+  await open(page);
+  await expect(page.locator("#sigChip .eyebrow")).toHaveText("METER");
+  await expect(page.locator("#sigVal")).toHaveText("4/4");
+  await page.selectOption("#sigSel", "6/8 in 2");
+  await expect(page.locator("#sigVal")).toHaveText("6/8 in 2");
+});
+
+test("ArrowUp and ArrowDown nudge BPM by 1", async ({ page }) => {
+  await open(page);
+  const startBpm = await page.evaluate(() => state.bpm);
+  await page.keyboard.press("ArrowUp");
+  expect(await page.evaluate(() => state.bpm)).toBe(startBpm + 1);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  expect(await page.evaluate(() => state.bpm)).toBe(startBpm - 1);
 });
