@@ -75,16 +75,46 @@ test("STOP cuts clicks that were already queued", async ({ page }) => {
   expect(await page.evaluate(() => __bus !== bus)).toBe(true);
 });
 
+// Record what the count-in voice says and when, like spyClicks.
+const spySpeech = (page) => page.evaluate(() => {
+  window.__spoken = [];
+  const real = speakAt;
+  window.speakAt = (t, n, ...rest) => { __spoken.push({ t, n }); real(t, n, ...rest); };
+});
+const spoken = (page) => page.evaluate(() => __spoken);
+
 test("6/8 in 2: BPM counts dotted quarters and the count-in speaks the pulses", async ({ page }) => {
   await page.evaluate(() => setBpm(68));
   await page.selectOption("#sigSel", "6/8 in 2");
   await spyClicks(page);
+  await spySpeech(page);
   await page.click("#playBtn");
   await page.waitForTimeout(2600);
+  const voice = (await spoken(page)).slice(0, 2);
+  expect(voice.map((v) => v.n)).toEqual([1, 2]);                // "1 … 2"
+  expect(voice[1].t - voice[0].t).toBeCloseTo(60 / 68, 2);
   const list = await clicks(page);
-  const count = list.slice(0, 2), bar = list.slice(2, 8);
-  expect(count[1].t - count[0].t).toBeCloseTo(60 / 68, 2);    // "1 … 2"
-  for (const g of gaps(bar)) expect(g).toBeCloseTo(60 / 68 / 3, 2);
+  expect(list[0].t).toBeCloseTo(voice[0].t, 3);
+  for (const g of gaps(list.slice(0, 12))) expect(g).toBeCloseTo(60 / 68 / 3, 2);   // count bar clicks every eighth, like the song
+});
+
+test("the count-in plays the song's own click, even on beats the count skips", async ({ page }) => {
+  await page.evaluate(() => {                                   // 2-bar count: "1 … 2 … 1 2 3 4"
+    setBpm(240); state.countIn = 2; state.subdiv = 2; state.accents = [2, 1, 0, 1];   // eighths, beat 3 muted
+  });
+  await spyClicks(page);
+  await spySpeech(page);
+  await page.click("#playBtn");
+  await page.waitForTimeout(3800);                              // 2 count bars + a song bar
+  const list = await clicks(page), bar = 1, t0 = list[0].t;     // 4/4 at 240: a bar a second
+  const inBar = (i) => list.filter((c) => c.t >= t0 + i * bar - 0.01 && c.t < t0 + (i + 1) * bar - 0.01)
+    .map((c) => [+((c.t - t0 - i * bar) / (bar / 8)).toFixed(1), c.kind]);   // [eighth in the bar, kind]
+  const song = inBar(2);
+  expect(song).toEqual([[0, 2], [1, 0], [2, 1], [3, 0], [5, 0], [6, 1], [7, 0]]);
+  expect(inBar(0)).toEqual(song);                               // "1 … 2" bar
+  expect(inBar(1)).toEqual(song);                               // "1 2 3 4" bar
+  const voice = (await spoken(page)).map((v) => [v.n, +((v.t - t0) / (bar / 4)).toFixed(1)]);
+  expect(voice).toEqual([[1, 0], [2, 2], [1, 4], [2, 5], [3, 6], [4, 7]]);   // [number, beat]
 });
 
 // Gain of the first node clickAt creates (its output), and which stick sample it used.
@@ -114,11 +144,11 @@ async function probe(page) {
 test("weak-beat volume and accent pitch", async ({ page }) => {
   await initAudio(page);
   await page.evaluate(() => { state.sound = "stick"; });
-  expect(await probe(page)).toEqual({ accent: [1, "n"], weak: [0.5, "n"], sub: [0.28, "n"] });
+  expect(await probe(page)).toEqual({ accent: [1, "n"], weak: [1, "n"], sub: [0.56, "n"] });   // 100% by default
   await page.click("#weakChip");
-  expect(await probe(page)).toEqual({ accent: [1, "n"], weak: [1, "n"], sub: [0.56, "n"] });
+  expect(await probe(page)).toEqual({ accent: [1, "n"], weak: [0.5, "n"], sub: [0.28, "n"] });
   await page.evaluate(() => { state.accentPitch = true; });
-  expect(await probe(page)).toEqual({ accent: [1, "a"], weak: [1, "n"], sub: [0.56, "s"] });
+  expect(await probe(page)).toEqual({ accent: [1, "a"], weak: [0.5, "n"], sub: [0.28, "s"] });
 });
 
 test("every synth sound is audible and doesn't clip", async ({ page }) => {

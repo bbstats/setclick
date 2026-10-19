@@ -515,7 +515,7 @@ textarea{min-height:110px; resize:vertical;}
       <span class="eyebrow">COUNT</span><span id="cntVal">1 bar</span>
     </button>
     <button class="chip count" id="weakChip" aria-label="Weak beat volume">
-      <span class="eyebrow">WEAK</span><span id="weakVal">50%</span>
+      <span class="eyebrow">WEAK</span><span id="weakVal">100%</span>
     </button>
   </div>
   <div class="transportrow">
@@ -626,7 +626,7 @@ const state = {
   sound: "click", vol: 0.8, muted: false,   // click volume; mute is never persisted
   voiceVol: 0.8, voiceMuted: false,          // spoken count-in volume
   output: "both",                  // "left" | "both" | "right": one side only for a split cable
-  weak: 0.5,                       // per song: weak-beat volume (1 = same as accents)
+  weak: 1,                         // per song: weak-beat volume (1 = same as accents, 0.5 = half)
   accentPitch: false,              // accents/subdivisions change pitch, not just volume
   dotted: false,                   // "6/8 in 2": BPM counts dotted quarters, not eighths
   countIn: 1,                      // per-song: bars of spoken count (0/1/2)
@@ -858,33 +858,28 @@ function scheduler() {
   if (nextT < ctx.currentTime - 0.05) {      // resumed after an audio interruption:
     nextT = ctx.currentTime + 0.06;          // re-anchor instead of bursting to catch up
   }
+  // The count-in plays the song's own click (accents, mutes, subdivisions) with the count
+  // spoken over it, so the band hears the feel it's about to play even where the count skips beats.
   while (nextT < ctx.currentTime + AHEAD) {
-    if (phase === "count") {
-      const barIx = Math.floor(countPos / state.beats);
-      const bInBar = countPos % state.beats;
-      const sparse = state.countIn === 2 && barIx === 0;   // "1... 2... 1 2 3 4"
-      const step = (state.dotted && isCompound()) || sparse ? countStep() : 1;   // dotted: count the pulses
-      if (bInBar % step === 0) {
-        const n = bInBar / step + 1;
-        clickAt(nextT, bInBar === 0 ? 2 : 1);
-        speakAt(nextT, n, bInBar === 0, beatDur() * step);
-        queueLamp({ t: nextT, b: bInBar, count: n });
-      }
-      nextT += beatDur();
-      countPos++;
-      if (countPos >= countTotal) { phase = "run"; beat = 0; sub = 0; }
-      continue;
-    }
     if (sub === 0) {
       const acc = state.accents[beat] ?? 1;
       if (acc > 0) clickAt(nextT, acc);
-      queueLamp({ t: nextT, b: beat });
+      if (phase === "count") {
+        const sparse = state.countIn === 2 && countPos < state.beats;   // "1... 2... 1 2 3 4"
+        const step = (state.dotted && isCompound()) || sparse ? countStep() : 1;   // dotted: count the pulses
+        const n = Math.floor(beat / step) + 1;                            // shown until the next count
+        if (beat % step === 0) speakAt(nextT, n, beat === 0, beatDur() * step);
+        queueLamp({ t: nextT, b: beat, count: n });
+      } else queueLamp({ t: nextT, b: beat });
     } else if (state.subdiv > 1) {
       clickAt(nextT, 0);
     }
     nextT += beatDur() / state.subdiv;
     sub++;
-    if (sub >= state.subdiv) { sub = 0; beat = (beat + 1) % state.beats; }
+    if (sub >= state.subdiv) {
+      sub = 0; beat = (beat + 1) % state.beats;
+      if (phase === "count" && ++countPos >= countTotal) { phase = "run"; beat = 0; }   // the song starts on 1
+    }
   }
 }
 
@@ -1678,7 +1673,7 @@ function loadSong(ix, opts = {}) {
   state.subdiv = s.subdiv ?? 1; sub = 0;
   $("#subSel").value = String(state.subdiv); updateSubChip();
   state.countIn = s.countIn ?? 1;
-  state.weak = s.weak ?? 0.5; updateWeakChip();
+  state.weak = s.weak ?? 1; updateWeakChip();
   updateCountChip();
   if (s.bpm) setBpm(s.bpm);
   else if (!opts.silent) toast("No BPM saved for this song — tap it in or nudge the slider");
