@@ -66,11 +66,11 @@ test("WEAK and FEEL are saved per song", async ({ page }) => {
   await page.click("#weakChip");
   await page.selectOption("#subSel", "2");
   await page.evaluate(() => loadSong(1, { instant: true }));
-  expect(await page.textContent("#weakVal")).toBe("50%");
+  expect(await page.textContent("#weakVal")).toBe("100%");                 // the default
   await page.evaluate(() => loadSong(0, { instant: true }));
   await page.reload();
   await open(page);
-  expect(await page.textContent("#weakVal")).toBe("100%");
+  expect(await page.textContent("#weakVal")).toBe("50%");
   expect(await page.textContent("#subVal")).toBe("♪♪");
 });
 

@@ -515,7 +515,7 @@ textarea{min-height:110px; resize:vertical;}
       <span class="eyebrow">COUNT</span><span id="cntVal">1 bar</span>
     </button>
     <button class="chip count" id="weakChip" aria-label="Weak beat volume">
-      <span class="eyebrow">WEAK</span><span id="weakVal">50%</span>
+      <span class="eyebrow">WEAK</span><span id="weakVal">100%</span>
     </button>
   </div>
   <div class="transportrow">
@@ -626,7 +626,7 @@ const state = {
   sound: "click", vol: 0.8, muted: false,   // click volume; mute is never persisted
   voiceVol: 0.8, voiceMuted: false,          // spoken count-in volume
   output: "both",                  // "left" | "both" | "right": one side only for a split cable
-  weak: 0.5,                       // per song: weak-beat volume (1 = same as accents)
+  weak: 1,                         // per song: weak-beat volume (1 = same as accents, 0.5 = half)
   accentPitch: false,              // accents/subdivisions change pitch, not just volume
   dotted: false,                   // "6/8 in 2": BPM counts dotted quarters, not eighths
   countIn: 1,                      // per-song: bars of spoken count (0/1/2)
@@ -1673,7 +1673,7 @@ function loadSong(ix, opts = {}) {
   state.subdiv = s.subdiv ?? 1; sub = 0;
   $("#subSel").value = String(state.subdiv); updateSubChip();
   state.countIn = s.countIn ?? 1;
-  state.weak = s.weak ?? 0.5; updateWeakChip();
+  state.weak = s.weak ?? 1; updateWeakChip();
   updateCountChip();
   if (s.bpm) setBpm(s.bpm);
   else if (!opts.silent) toast("No BPM saved for this song — tap it in or nudge the slider");

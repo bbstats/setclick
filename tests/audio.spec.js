@@ -144,11 +144,11 @@ async function probe(page) {
 test("weak-beat volume and accent pitch", async ({ page }) => {
   await initAudio(page);
   await page.evaluate(() => { state.sound = "stick"; });
-  expect(await probe(page)).toEqual({ accent: [1, "n"], weak: [0.5, "n"], sub: [0.28, "n"] });
+  expect(await probe(page)).toEqual({ accent: [1, "n"], weak: [1, "n"], sub: [0.56, "n"] });   // 100% by default
   await page.click("#weakChip");
-  expect(await probe(page)).toEqual({ accent: [1, "n"], weak: [1, "n"], sub: [0.56, "n"] });
+  expect(await probe(page)).toEqual({ accent: [1, "n"], weak: [0.5, "n"], sub: [0.28, "n"] });
   await page.evaluate(() => { state.accentPitch = true; });
-  expect(await probe(page)).toEqual({ accent: [1, "a"], weak: [1, "n"], sub: [0.56, "s"] });
+  expect(await probe(page)).toEqual({ accent: [1, "a"], weak: [0.5, "n"], sub: [0.28, "s"] });
 });
 
 test("every synth sound is audible and doesn't clip", async ({ page }) => {
