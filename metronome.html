@@ -114,7 +114,8 @@ button{border:0; background:none; padding:0; cursor:pointer;}
 .volrow input[type=range]{height:4px; min-width:0;}             /* sliders default to ~130px wide */
 .volrow input[type=range]::-webkit-slider-thumb{width:22px; height:22px;}
 .volrow.muted input[type=range]{opacity:.35;}
-.volpct{min-width:40px; text-align:right; font-size:12px; font-weight:700; color:var(--faint); font-variant-numeric:tabular-nums;}
+.volval{min-width:40px; display:flex; flex-direction:column; align-items:flex-end; gap:2px; line-height:1;}
+.volpct{font-size:12px; font-weight:700; color:var(--faint); font-variant-numeric:tabular-nums;}
 .volrow.muted .volpct{color:var(--red);}
 
 /* ---------- tempo display ---------- */
@@ -125,6 +126,19 @@ button{border:0; background:none; padding:0; cursor:pointer;}
   color:var(--amber); text-shadow:0 0 32px rgba(255,174,66,.18);
 }
 .bpm-num.pulse{animation:pulse .12s ease-out;}
+#bpmNum,.bpm-label{cursor:pointer;}              /* tap to type a tempo */
+#bpmNum{position:relative;}
+#bpmNum::after{                                   /* pencil: says it can be typed in; part of the tap target */
+  content:""; position:absolute; left:100%; bottom:.1em; margin-left:.06em; width:max(16px, .13em); height:max(16px, .13em);
+  background:var(--dim); -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L19.5 8.5a2.8 2.8 0 0 0-4-4L4 16z'/%3E%3Cpath d='m13.5 6.5 4 4'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L19.5 8.5a2.8 2.8 0 0 0-4-4L4 16z'/%3E%3Cpath d='m13.5 6.5 4 4'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+#bpmNum.count::after{display:none;}
+#bpmEdit{
+  width:3.2ch; padding:0; margin:0; border:0; outline:none; background:none; text-align:center;
+  font-family:inherit; caret-color:var(--amber); -webkit-user-select:text; user-select:text;
+}
+#bpmEdit::placeholder{color:var(--amber); opacity:.3;}   /* the old tempo, until you type */
 @keyframes pulse{from{transform:scale(1.035); text-shadow:0 0 44px rgba(255,174,66,.45);} to{transform:scale(1);}}
 .bpm-num.count{color:var(--red); text-shadow:0 0 36px rgba(255,79,63,.3);}
 .bpm-label{font-size:13px; letter-spacing:.42em; color:var(--faint); font-weight:700; margin-top:2px;}
@@ -147,6 +161,7 @@ button{border:0; background:none; padding:0; cursor:pointer;}
 /* ---------- controls ---------- */
 .controls{flex:0 0 auto; display:flex; flex-direction:column; gap:12px; margin-top:8px;}
 .sliderrow{display:flex; align-items:center; gap:12px;}
+.display .sliderrow{align-self:stretch; margin-top:14px;}   /* right under the BPM it sets */
 .step{
   width:56px; height:56px; border-radius:50%; background:var(--panel);
   border:1px solid var(--line); font-size:26px; font-weight:700; color:var(--text);
@@ -173,8 +188,9 @@ input[type=range]::-webkit-slider-thumb{
 .sndgrid{display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;}
 .sndgrid .chip{height:48px; font-size:13px; padding:0 4px;}
 .sndgrid .chip.on{border-color:var(--amber); color:var(--amber);}
+.sndgrid.outgrid{grid-template-columns:repeat(3, 1fr);}
 .chip.count{flex-direction:column; gap:2px; line-height:1; font-size:13px;}
-.chip.count .eyebrow{font-size:9px; letter-spacing:.14em; color:var(--faint); font-weight:800;}
+.eyebrow{font-size:9px; letter-spacing:.14em; color:var(--faint); font-weight:800;}
 .chip.count.off #cntVal{color:var(--dim);}
 .chip.count:not(.off) #cntVal{color:var(--amber);}
 #weakVal{color:var(--amber);}
@@ -452,7 +468,7 @@ textarea{min-height:110px; resize:vertical;}
       </svg>
     </button>
     <input type="range" id="volSlider" min="0" max="100" value="80" aria-label="Click volume">
-    <span class="volpct" id="volPct">80%</span>
+    <span class="volval"><span class="eyebrow">CLICK</span><span class="volpct" id="volPct">80%</span></span>
   </div>
   <div class="volrow" id="voiceRow">
     <button class="volmute" id="voiceMuteBtn" aria-label="Mute voice" aria-pressed="false">
@@ -464,23 +480,25 @@ textarea{min-height:110px; resize:vertical;}
       </svg>
     </button>
     <input type="range" id="voiceSlider" min="0" max="100" value="80" aria-label="Voice volume">
-    <span class="volpct" id="voicePct">80%</span>
+    <span class="volval"><span class="eyebrow">VOICE</span><span class="volpct" id="voicePct">80%</span></span>
   </div>
 </div>
 
 <div class="display">
-  <div class="bpm-num" id="bpmNum">120</div>
+  <input class="bpm-num" id="bpmEdit" hidden type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3"
+         enterkeyhint="done" autocomplete="off" aria-label="Tempo in BPM">
+  <div class="bpm-num" id="bpmNum" role="button">120</div>
   <div class="bpm-label">BPM</div>
-  <div class="lamps" id="lamps"></div>
-  <div class="lamps-hint">Tap a beat to accent or mute it · red = beat 1</div>
-</div>
-
-<div class="controls">
   <div class="sliderrow">
     <button class="step" id="minus" aria-label="Slower">&#8722;</button>
     <input type="range" id="slider" min="30" max="280" value="120" step="1" aria-label="Tempo">
     <button class="step" id="plus" aria-label="Faster">+</button>
   </div>
+  <div class="lamps" id="lamps"></div>
+  <div class="lamps-hint">Tap a beat to accent or mute it · red = beat 1</div>
+</div>
+
+<div class="controls">
   <div class="btnrow">
     <button class="chip tap" id="tapBtn">TAP</button>
     <select class="chip" id="sigSel" aria-label="Time signature"></select>
@@ -543,6 +561,16 @@ textarea{min-height:110px; resize:vertical;}
       </div>
     </div>
 
+    <div class="field">
+      <label>Output</label>
+      <div class="sndgrid outgrid">
+        <button class="chip out" data-out="left">Left only</button>
+        <button class="chip out" data-out="both">Both</button>
+        <button class="chip out" data-out="right">Right only</button>
+      </div>
+      <div class="hint">On a split cable, pick the side that feeds the in-ears so the click stays out of the house.</div>
+    </div>
+
     <div class="togglerow">
       <div><div class="tl">Keep screen awake</div><div class="ts">While the click is running</div></div>
       <button class="switch on" id="wakeSw"></button>
@@ -597,6 +625,7 @@ const state = {
   accents: [2, 1, 1, 1],          // 2 accent, 1 normal, 0 mute
   sound: "click", vol: 0.8, muted: false,   // click volume; mute is never persisted
   voiceVol: 0.8, voiceMuted: false,          // spoken count-in volume
+  output: "both",                  // "left" | "both" | "right": one side only for a split cable
   weak: 0.5,                       // per song: weak-beat volume (1 = same as accents)
   accentPitch: false,              // accents/subdivisions change pitch, not just volume
   dotted: false,                   // "6/8 in 2": BPM counts dotted quarters, not eighths
@@ -638,7 +667,7 @@ const store = {
 };
 
 /* ---------------- audio engine ---------------- */
-let ctx = null, master = null, bus = null, clickBus = null, voiceBus = null, silentEl = null;
+let ctx = null, master = null, sides = null, bus = null, clickBus = null, voiceBus = null, silentEl = null;
 let timer = null, nextT = 0, beat = 0, sub = 0;
 let phase = "run", countPos = 0, countTotal = 0;
 const AHEAD = 0.14, TICK_MS = 25;
@@ -701,7 +730,11 @@ function initAudio() {
   ctx = new AC({ latencyHint: "interactive" });
   master = ctx.createGain();
   master.gain.value = 1;
-  master.connect(ctx.destination);
+  // Every sound is mono: it goes out on both sides at full level, or on one (applyOutput).
+  const merger = ctx.createChannelMerger(2);
+  sides = [0, 1].map((ch) => { const g = ctx.createGain(); master.connect(g); g.connect(merger, 0, ch); return g; });
+  merger.connect(ctx.destination);
+  applyOutput();
   newBus();
   ctx.onstatechange = () => {                // e.g. a notification or another app grabbed audio
     if (!state.playing || ctx.state === "running") return;
@@ -1013,6 +1046,23 @@ function setBpm(v, fromSlider) {
     saveSet();
     updateActiveCardBpm();
   }
+}
+
+// Tap the number to type a tempo: Enter or tapping away sets it; nothing typed or Escape keeps it.
+function editBpm() {
+  const num = $("#bpmNum"), ed = $("#bpmEdit");
+  if (num.classList.contains("count")) return;   // the count-in owns the display
+  ed.value = ""; ed.placeholder = state.bpm;    // starts empty: iOS won't reliably select-all to replace
+  ed.style.height = num.offsetHeight + "px";     // inputs ignore the tight line-height: no jump
+  num.hidden = true; ed.hidden = false;
+  ed.focus();                                    // in the tap itself, or iOS shows no keypad
+}
+function endBpmEdit(save) {
+  const num = $("#bpmNum"), ed = $("#bpmEdit");
+  if (ed.hidden) return;
+  ed.hidden = true; num.hidden = false;
+  const v = parseInt(ed.value, 10);
+  if (save && v > 0) setBpm(v);                  // clamps to 30–280
 }
 
 let taps = [];
@@ -1815,8 +1865,14 @@ function applyVolume() {
 }
 
 /* ---------------- settings ---------------- */
+function applyOutput() {
+  if (!sides) return;
+  sides[0].gain.setTargetAtTime(state.output === "right" ? 0 : 1, ctx.currentTime, 0.004);
+  sides[1].gain.setTargetAtTime(state.output === "left" ? 0 : 1, ctx.currentTime, 0.004);
+}
 function reflectSettings() {
   $$(".snd").forEach((b) => b.classList.toggle("on", b.dataset.snd === state.sound));
+  $$(".out").forEach((b) => b.classList.toggle("on", b.dataset.out === state.output));
   $("#wakeSw").classList.toggle("on", state.wake);
   $("#flashSw").classList.toggle("on", state.flash);
   $("#accentSw").classList.toggle("on", state.accentPitch);
@@ -1824,7 +1880,7 @@ function reflectSettings() {
 }
 function persistSettings() {
   store.set("settings", {
-    sound: state.sound, vol: state.vol, voiceVol: state.voiceVol, wake: state.wake, flash: state.flash, accentPitch: state.accentPitch,
+    sound: state.sound, output: state.output, vol: state.vol, voiceVol: state.voiceVol, wake: state.wake, flash: state.flash, accentPitch: state.accentPitch,
     bpm: state.bpm,                  // tempo for a first song with no BPM of its own
   });
 }
@@ -1941,6 +1997,14 @@ function wire() {
   holdRepeat($("#minus"), () => setBpm(state.bpm - 1));
   holdRepeat($("#plus"), () => setBpm(state.bpm + 1));
   $("#slider").addEventListener("input", (e) => setBpm(+e.target.value, true));
+  $("#bpmNum").addEventListener("click", editBpm);
+  $(".bpm-label").addEventListener("click", editBpm);
+  $("#bpmEdit").addEventListener("input", (e) => { e.target.value = e.target.value.replace(/\D/g, ""); });
+  $("#bpmEdit").addEventListener("blur", () => endBpmEdit(true));
+  $("#bpmEdit").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") e.target.blur();
+    else if (e.key === "Escape") { endBpmEdit(false); e.target.blur(); }
+  });
 
   $("#sigSel").addEventListener("change", (e) => {
     applyMeter(e.target.value);
@@ -1987,6 +2051,10 @@ function wire() {
     // preview only when stopped: mid-play it landed off the beat. Running clicks pick up
     // the new sound on their own from the next scheduled beat.
     if (ctx && !state.playing) clickAt(ctx.currentTime + 0.01, 2);
+  }));
+  $$(".out").forEach((b) => b.addEventListener("click", () => {
+    state.output = b.dataset.out; applyOutput(); reflectSettings(); persistSettings();
+    if (ctx && !state.playing) clickAt(ctx.currentTime + 0.05, 2);   // hear which side it's on
   }));
   $("#volSlider").addEventListener("input", (e) => {
     state.vol = +e.target.value / 100; state.muted = false;
@@ -2035,6 +2103,7 @@ async function init() {
   if (creds) state.creds = Object.assign(state.creds, creds);
   if (settings) {
     if ($$(".snd").some((b) => b.dataset.snd === settings.sound)) state.sound = settings.sound;
+    if ($$(".out").some((b) => b.dataset.out === settings.output)) state.output = settings.output;
     if (settings.vol > 0) state.vol = settings.vol;   // never boot silent: a saved 0 falls back to default
     // before there was a voice knob the voice followed the one volume: keep that balance
     const voiceVol = settings.voiceVol ?? settings.vol;
