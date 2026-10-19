@@ -97,3 +97,42 @@ test("both volume bars are labelled", async ({ page }) => {
   await expect(page.locator("#volRow .eyebrow")).toHaveText("CLICK");
   await expect(page.locator("#voiceRow .eyebrow")).toHaveText("VOICE");
 });
+
+test("tap the BPM to type a tempo: Enter or tapping away sets it; nothing typed or Escape keeps it", async ({ page }) => {
+  await open(page);
+  const sliderTop = () => page.evaluate(() => document.querySelector(".sliderrow").getBoundingClientRect().top);
+  const before = await sliderTop();
+  await page.click("#bpmNum");
+  await expect(page.locator("#bpmEdit")).toBeFocused();
+  await expect(page.locator("#bpmEdit")).toHaveValue("");
+  await expect(page.locator("#bpmEdit")).toHaveAttribute("placeholder", "126");
+  expect(Math.abs((await sliderTop()) - before)).toBeLessThanOrEqual(1);   // the layout doesn't jump
+  await page.keyboard.type("92");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#bpmNum")).toHaveText("92");
+  expect(await page.evaluate(() => [state.bpm, +document.querySelector("#slider").value, state.set.songs[0].bpm]))
+    .toEqual([92, 92, 92]);
+
+  await page.click("#bpmNum");
+  await page.keyboard.type("5x00");                                        // letters dropped, too fast clamps
+  await page.click(".lamps-hint");                                         // tap away
+  await expect(page.locator("#bpmNum")).toHaveText("280");
+
+  await page.click("#bpmNum");
+  await page.keyboard.type("100");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#bpmNum")).toHaveText("280");
+  await expect(page.locator("#bpmEdit")).toBeHidden();
+
+  await page.click("#bpmNum");                                             // opened by mistake
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#bpmNum")).toHaveText("280");
+});
+
+test("the BPM doesn't open for typing while it shows the count-in", async ({ page }) => {
+  await open(page);
+  await page.click("#playBtn");
+  await page.waitForFunction(() => document.querySelector("#bpmNum").classList.contains("count"));
+  await page.evaluate(() => editBpm());
+  await expect(page.locator("#bpmEdit")).toBeHidden();
+});

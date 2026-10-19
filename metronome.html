@@ -126,6 +126,12 @@ button{border:0; background:none; padding:0; cursor:pointer;}
   color:var(--amber); text-shadow:0 0 32px rgba(255,174,66,.18);
 }
 .bpm-num.pulse{animation:pulse .12s ease-out;}
+#bpmNum{cursor:pointer;}                          /* tap to type a tempo */
+#bpmEdit{
+  width:3.2ch; padding:0; margin:0; border:0; outline:none; background:none; text-align:center;
+  font-family:inherit; caret-color:var(--amber); -webkit-user-select:text; user-select:text;
+}
+#bpmEdit::placeholder{color:var(--amber); opacity:.3;}   /* the old tempo, until you type */
 @keyframes pulse{from{transform:scale(1.035); text-shadow:0 0 44px rgba(255,174,66,.45);} to{transform:scale(1);}}
 .bpm-num.count{color:var(--red); text-shadow:0 0 36px rgba(255,79,63,.3);}
 .bpm-label{font-size:13px; letter-spacing:.42em; color:var(--faint); font-weight:700; margin-top:2px;}
@@ -472,7 +478,9 @@ textarea{min-height:110px; resize:vertical;}
 </div>
 
 <div class="display">
-  <div class="bpm-num" id="bpmNum">120</div>
+  <input class="bpm-num" id="bpmEdit" hidden type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3"
+         enterkeyhint="done" autocomplete="off" aria-label="Tempo in BPM">
+  <div class="bpm-num" id="bpmNum" role="button">120</div>
   <div class="bpm-label">BPM</div>
   <div class="sliderrow">
     <button class="step" id="minus" aria-label="Slower">&#8722;</button>
@@ -1031,6 +1039,23 @@ function setBpm(v, fromSlider) {
     saveSet();
     updateActiveCardBpm();
   }
+}
+
+// Tap the number to type a tempo: Enter or tapping away sets it; nothing typed or Escape keeps it.
+function editBpm() {
+  const num = $("#bpmNum"), ed = $("#bpmEdit");
+  if (num.classList.contains("count")) return;   // the count-in owns the display
+  ed.value = ""; ed.placeholder = state.bpm;    // starts empty: iOS won't reliably select-all to replace
+  ed.style.height = num.offsetHeight + "px";     // inputs ignore the tight line-height: no jump
+  num.hidden = true; ed.hidden = false;
+  ed.focus();                                    // in the tap itself, or iOS shows no keypad
+}
+function endBpmEdit(save) {
+  const num = $("#bpmNum"), ed = $("#bpmEdit");
+  if (ed.hidden) return;
+  ed.hidden = true; num.hidden = false;
+  const v = parseInt(ed.value, 10);
+  if (save && v > 0) setBpm(v);                  // clamps to 30–280
 }
 
 let taps = [];
@@ -1965,6 +1990,13 @@ function wire() {
   holdRepeat($("#minus"), () => setBpm(state.bpm - 1));
   holdRepeat($("#plus"), () => setBpm(state.bpm + 1));
   $("#slider").addEventListener("input", (e) => setBpm(+e.target.value, true));
+  $("#bpmNum").addEventListener("click", editBpm);
+  $("#bpmEdit").addEventListener("input", (e) => { e.target.value = e.target.value.replace(/\D/g, ""); });
+  $("#bpmEdit").addEventListener("blur", () => endBpmEdit(true));
+  $("#bpmEdit").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") e.target.blur();
+    else if (e.key === "Escape") { endBpmEdit(false); e.target.blur(); }
+  });
 
   $("#sigSel").addEventListener("change", (e) => {
     applyMeter(e.target.value);
