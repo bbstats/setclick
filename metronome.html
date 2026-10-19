@@ -126,7 +126,14 @@ button{border:0; background:none; padding:0; cursor:pointer;}
   color:var(--amber); text-shadow:0 0 32px rgba(255,174,66,.18);
 }
 .bpm-num.pulse{animation:pulse .12s ease-out;}
-#bpmNum{cursor:pointer;}                          /* tap to type a tempo */
+#bpmNum,.bpm-label{cursor:pointer;}              /* tap to type a tempo */
+#bpmNum{position:relative;}
+#bpmNum::after{                                   /* pencil: says it can be typed in; part of the tap target */
+  content:""; position:absolute; left:100%; bottom:.1em; margin-left:.06em; width:max(16px, .13em); height:max(16px, .13em);
+  background:var(--dim); -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L19.5 8.5a2.8 2.8 0 0 0-4-4L4 16z'/%3E%3Cpath d='m13.5 6.5 4 4'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L19.5 8.5a2.8 2.8 0 0 0-4-4L4 16z'/%3E%3Cpath d='m13.5 6.5 4 4'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+#bpmNum.count::after{display:none;}
 #bpmEdit{
   width:3.2ch; padding:0; margin:0; border:0; outline:none; background:none; text-align:center;
   font-family:inherit; caret-color:var(--amber); -webkit-user-select:text; user-select:text;
@@ -1991,6 +1998,7 @@ function wire() {
   holdRepeat($("#plus"), () => setBpm(state.bpm + 1));
   $("#slider").addEventListener("input", (e) => setBpm(+e.target.value, true));
   $("#bpmNum").addEventListener("click", editBpm);
+  $(".bpm-label").addEventListener("click", editBpm);
   $("#bpmEdit").addEventListener("input", (e) => { e.target.value = e.target.value.replace(/\D/g, ""); });
   $("#bpmEdit").addEventListener("blur", () => endBpmEdit(true));
   $("#bpmEdit").addEventListener("keydown", (e) => {

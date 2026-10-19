@@ -127,12 +127,18 @@ test("tap the BPM to type a tempo: Enter or tapping away sets it; nothing typed 
   await page.click("#bpmNum");                                             // opened by mistake
   await page.keyboard.press("Enter");
   await expect(page.locator("#bpmNum")).toHaveText("280");
+
+  await page.click(".bpm-label");                                          // the BPM under it opens it too
+  await expect(page.locator("#bpmEdit")).toBeFocused();
 });
 
-test("the BPM doesn't open for typing while it shows the count-in", async ({ page }) => {
+test("the BPM shows a pencil, but not while it shows the count-in (and doesn't open then)", async ({ page }) => {
   await open(page);
+  const pencil = () => page.evaluate(() => getComputedStyle(document.querySelector("#bpmNum"), "::after").display);
+  expect(await pencil()).toBe("block");
   await page.click("#playBtn");
   await page.waitForFunction(() => document.querySelector("#bpmNum").classList.contains("count"));
+  expect(await pencil()).toBe("none");
   await page.evaluate(() => editBpm());
   await expect(page.locator("#bpmEdit")).toBeHidden();
 });
