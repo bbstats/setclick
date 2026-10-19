@@ -88,3 +88,10 @@ test("a one-song set says 1 song", async ({ page }) => {
   await page.evaluate(() => useSet({ id: "manual:1", name: "Solo", songs: parseManual("Way Maker 68") }));
   await expect(page.locator("#setPillText")).toHaveText("Solo · 1 song");
 });
+
+test("the tempo bar and both volume bars are labelled", async ({ page }) => {
+  await open(page);
+  await expect(page.locator(".tempolbl")).toHaveText("TEMPO");
+  await expect(page.locator("#volRow .eyebrow")).toHaveText("CLICK");
+  await expect(page.locator("#voiceRow .eyebrow")).toHaveText("VOICE");
+});

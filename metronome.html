@@ -114,7 +114,8 @@ button{border:0; background:none; padding:0; cursor:pointer;}
 .volrow input[type=range]{height:4px; min-width:0;}             /* sliders default to ~130px wide */
 .volrow input[type=range]::-webkit-slider-thumb{width:22px; height:22px;}
 .volrow.muted input[type=range]{opacity:.35;}
-.volpct{min-width:40px; text-align:right; font-size:12px; font-weight:700; color:var(--faint); font-variant-numeric:tabular-nums;}
+.volval{min-width:40px; display:flex; flex-direction:column; align-items:flex-end; gap:2px; line-height:1;}
+.volpct{font-size:12px; font-weight:700; color:var(--faint); font-variant-numeric:tabular-nums;}
 .volrow.muted .volpct{color:var(--red);}
 
 /* ---------- tempo display ---------- */
@@ -146,7 +147,9 @@ button{border:0; background:none; padding:0; cursor:pointer;}
 
 /* ---------- controls ---------- */
 .controls{flex:0 0 auto; display:flex; flex-direction:column; gap:12px; margin-top:8px;}
-.sliderrow{display:flex; align-items:center; gap:12px;}
+.sliderrow{display:flex; flex-wrap:wrap; align-items:center; gap:0 12px;}
+/* says what the long bar is: on its own line, tucked down between − and + just over the track */
+.eyebrow.tempolbl{flex:0 0 100%; order:-1; text-align:center; font-size:11px; line-height:1; margin-bottom:-8px;}
 .step{
   width:56px; height:56px; border-radius:50%; background:var(--panel);
   border:1px solid var(--line); font-size:26px; font-weight:700; color:var(--text);
@@ -173,8 +176,9 @@ input[type=range]::-webkit-slider-thumb{
 .sndgrid{display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;}
 .sndgrid .chip{height:48px; font-size:13px; padding:0 4px;}
 .sndgrid .chip.on{border-color:var(--amber); color:var(--amber);}
+.sndgrid.outgrid{grid-template-columns:repeat(3, 1fr);}
 .chip.count{flex-direction:column; gap:2px; line-height:1; font-size:13px;}
-.chip.count .eyebrow{font-size:9px; letter-spacing:.14em; color:var(--faint); font-weight:800;}
+.eyebrow{font-size:9px; letter-spacing:.14em; color:var(--faint); font-weight:800;}
 .chip.count.off #cntVal{color:var(--dim);}
 .chip.count:not(.off) #cntVal{color:var(--amber);}
 #weakVal{color:var(--amber);}
@@ -390,6 +394,7 @@ textarea{min-height:110px; resize:vertical;}
   .vols{grid-area:vol; margin-top:4px;}
   .display{grid-area:display; min-height:0;}
   .controls{grid-area:controls; gap:10px;}
+  .eyebrow.tempolbl{flex-basis:auto; order:0; margin:0;}   /* no height to spare: beside the bar instead */
   .bpm-num{font-size:clamp(56px, 26vh, 260px);}
   .lamps{margin-top:max(8px, 1.6vh);}
   .transport{height:max(60px, 10vh); font-size:20px;}
@@ -452,7 +457,7 @@ textarea{min-height:110px; resize:vertical;}
       </svg>
     </button>
     <input type="range" id="volSlider" min="0" max="100" value="80" aria-label="Click volume">
-    <span class="volpct" id="volPct">80%</span>
+    <span class="volval"><span class="eyebrow">CLICK</span><span class="volpct" id="volPct">80%</span></span>
   </div>
   <div class="volrow" id="voiceRow">
     <button class="volmute" id="voiceMuteBtn" aria-label="Mute voice" aria-pressed="false">
@@ -464,7 +469,7 @@ textarea{min-height:110px; resize:vertical;}
       </svg>
     </button>
     <input type="range" id="voiceSlider" min="0" max="100" value="80" aria-label="Voice volume">
-    <span class="volpct" id="voicePct">80%</span>
+    <span class="volval"><span class="eyebrow">VOICE</span><span class="volpct" id="voicePct">80%</span></span>
   </div>
 </div>
 
@@ -478,6 +483,7 @@ textarea{min-height:110px; resize:vertical;}
 <div class="controls">
   <div class="sliderrow">
     <button class="step" id="minus" aria-label="Slower">&#8722;</button>
+    <span class="eyebrow tempolbl">TEMPO</span>
     <input type="range" id="slider" min="30" max="280" value="120" step="1" aria-label="Tempo">
     <button class="step" id="plus" aria-label="Faster">+</button>
   </div>
@@ -543,6 +549,16 @@ textarea{min-height:110px; resize:vertical;}
       </div>
     </div>
 
+    <div class="field">
+      <label>Output</label>
+      <div class="sndgrid outgrid">
+        <button class="chip out" data-out="left">Left only</button>
+        <button class="chip out" data-out="both">Both</button>
+        <button class="chip out" data-out="right">Right only</button>
+      </div>
+      <div class="hint">On a split cable, pick the side that feeds the in-ears so the click stays out of the house.</div>
+    </div>
+
     <div class="togglerow">
       <div><div class="tl">Keep screen awake</div><div class="ts">While the click is running</div></div>
       <button class="switch on" id="wakeSw"></button>
@@ -597,6 +613,7 @@ const state = {
   accents: [2, 1, 1, 1],          // 2 accent, 1 normal, 0 mute
   sound: "click", vol: 0.8, muted: false,   // click volume; mute is never persisted
   voiceVol: 0.8, voiceMuted: false,          // spoken count-in volume
+  output: "both",                  // "left" | "both" | "right": one side only for a split cable
   weak: 0.5,                       // per song: weak-beat volume (1 = same as accents)
   accentPitch: false,              // accents/subdivisions change pitch, not just volume
   dotted: false,                   // "6/8 in 2": BPM counts dotted quarters, not eighths
@@ -638,7 +655,7 @@ const store = {
 };
 
 /* ---------------- audio engine ---------------- */
-let ctx = null, master = null, bus = null, clickBus = null, voiceBus = null, silentEl = null;
+let ctx = null, master = null, sides = null, bus = null, clickBus = null, voiceBus = null, silentEl = null;
 let timer = null, nextT = 0, beat = 0, sub = 0;
 let phase = "run", countPos = 0, countTotal = 0;
 const AHEAD = 0.14, TICK_MS = 25;
@@ -701,7 +718,11 @@ function initAudio() {
   ctx = new AC({ latencyHint: "interactive" });
   master = ctx.createGain();
   master.gain.value = 1;
-  master.connect(ctx.destination);
+  // Every sound is mono: it goes out on both sides at full level, or on one (applyOutput).
+  const merger = ctx.createChannelMerger(2);
+  sides = [0, 1].map((ch) => { const g = ctx.createGain(); master.connect(g); g.connect(merger, 0, ch); return g; });
+  merger.connect(ctx.destination);
+  applyOutput();
   newBus();
   ctx.onstatechange = () => {                // e.g. a notification or another app grabbed audio
     if (!state.playing || ctx.state === "running") return;
@@ -1815,8 +1836,14 @@ function applyVolume() {
 }
 
 /* ---------------- settings ---------------- */
+function applyOutput() {
+  if (!sides) return;
+  sides[0].gain.setTargetAtTime(state.output === "right" ? 0 : 1, ctx.currentTime, 0.004);
+  sides[1].gain.setTargetAtTime(state.output === "left" ? 0 : 1, ctx.currentTime, 0.004);
+}
 function reflectSettings() {
   $$(".snd").forEach((b) => b.classList.toggle("on", b.dataset.snd === state.sound));
+  $$(".out").forEach((b) => b.classList.toggle("on", b.dataset.out === state.output));
   $("#wakeSw").classList.toggle("on", state.wake);
   $("#flashSw").classList.toggle("on", state.flash);
   $("#accentSw").classList.toggle("on", state.accentPitch);
@@ -1824,7 +1851,7 @@ function reflectSettings() {
 }
 function persistSettings() {
   store.set("settings", {
-    sound: state.sound, vol: state.vol, voiceVol: state.voiceVol, wake: state.wake, flash: state.flash, accentPitch: state.accentPitch,
+    sound: state.sound, output: state.output, vol: state.vol, voiceVol: state.voiceVol, wake: state.wake, flash: state.flash, accentPitch: state.accentPitch,
     bpm: state.bpm,                  // tempo for a first song with no BPM of its own
   });
 }
@@ -1988,6 +2015,10 @@ function wire() {
     // the new sound on their own from the next scheduled beat.
     if (ctx && !state.playing) clickAt(ctx.currentTime + 0.01, 2);
   }));
+  $$(".out").forEach((b) => b.addEventListener("click", () => {
+    state.output = b.dataset.out; applyOutput(); reflectSettings(); persistSettings();
+    if (ctx && !state.playing) clickAt(ctx.currentTime + 0.05, 2);   // hear which side it's on
+  }));
   $("#volSlider").addEventListener("input", (e) => {
     state.vol = +e.target.value / 100; state.muted = false;
     applyVolume(); persistSettings();
@@ -2035,6 +2066,7 @@ async function init() {
   if (creds) state.creds = Object.assign(state.creds, creds);
   if (settings) {
     if ($$(".snd").some((b) => b.dataset.snd === settings.sound)) state.sound = settings.sound;
+    if ($$(".out").some((b) => b.dataset.out === settings.output)) state.output = settings.output;
     if (settings.vol > 0) state.vol = settings.vol;   // never boot silent: a saved 0 falls back to default
     // before there was a voice knob the voice followed the one volume: keep that balance
     const voiceVol = settings.voiceVol ?? settings.vol;

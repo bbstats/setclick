@@ -169,3 +169,42 @@ test("the voice starts at the old single volume for settings saved before the vo
   await open(page);
   expect(await page.evaluate(() => [state.vol, state.voiceVol])).toEqual([0.5, 0.5]);
 });
+
+test("Output: Left/Right only put the click on one side at full level; Both matches it on each", async ({ page }) => {
+  await page.evaluate(() => {                                   // keep hold of what feeds the speakers
+    const real = AudioContext.prototype.createChannelMerger;
+    AudioContext.prototype.createChannelMerger = function (n) { return (window.__out = real.call(this, n)); };
+  });
+  await initAudio(page);
+  await page.evaluate(() => { state.sound = "beep"; });         // a pure tone: same peak every time
+  const peaks = (output) => page.evaluate(async (output) => {
+    state.output = output; applyOutput();
+    const split = ctx.createChannelSplitter(2);
+    __out.connect(split);
+    const meters = [0, 1].map((ch) => { const a = ctx.createAnalyser(); split.connect(a, ch); return a; });
+    const buf = new Float32Array(meters[0].fftSize), peak = [0, 0];
+    await new Promise((r) => setTimeout(r, 60));                 // let the side gains settle
+    clickAt(ctx.currentTime + 0.02, 2);
+    for (const end = performance.now() + 300; performance.now() < end; await new Promise((r) => setTimeout(r, 10)))
+      meters.forEach((a, ch) => { a.getFloatTimeDomainData(buf); for (const x of buf) peak[ch] = Math.max(peak[ch], Math.abs(x)); });
+    __out.disconnect(split);
+    return peak;
+  }, output);
+  const [left, both, right] = [await peaks("left"), await peaks("both"), await peaks("right")];
+  expect(left[0]).toBeGreaterThan(0.2);
+  expect(left[1]).toBeLessThan(0.001);
+  expect(right[0]).toBeLessThan(0.001);
+  expect(right[1]).toBeCloseTo(left[0], 2);
+  expect(both[0]).toBeCloseTo(left[0], 2);                       // no quieter than one side alone
+  expect(both[1]).toBeCloseTo(left[0], 2);
+});
+
+test("the Output choice survives a reload", async ({ page }) => {
+  await page.click("#settingsBtn");
+  await page.click('.out[data-out="left"]');
+  await expect(page.locator('.out[data-out="left"]')).toHaveClass(/\bon\b/);
+  await page.reload();
+  await open(page);
+  expect(await page.evaluate(() => state.output)).toBe("left");
+  await expect(page.locator('.out[data-out="left"]')).toHaveClass(/\bon\b/);
+});
