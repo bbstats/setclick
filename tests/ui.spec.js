@@ -13,7 +13,7 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
   test.describe(name, () => {
     test.use({ viewport });
 
-    test("layout fits: nothing off-screen, chips fit, 12/8 lamps clear the slider", async ({ page }) => {
+    test("layout fits: nothing off-screen, chips fit, 12/8 lamps sit between the slider and the chips", async ({ page }) => {
       await open(page);
       const offscreen = await page.evaluate(() => [...document.querySelectorAll("body *")]
         .filter((e) => !e.closest(".sheet, #carousel, #toast"))
@@ -24,10 +24,13 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
         .every((c) => c.scrollWidth <= c.clientWidth + 1));
       expect(chipsFit).toBe(true);
       await page.selectOption("#sigSel", "12/8");
-      const [lampsBottom, sliderTop] = await page.evaluate(() =>
-        [document.querySelector("#lamps").getBoundingClientRect().bottom,
-         document.querySelector(".sliderrow").getBoundingClientRect().top]);
-      expect(lampsBottom).toBeLessThanOrEqual(sliderTop);
+      const [numBottom, slider, lamps, chipsTop] = await page.evaluate(() => {
+        const r = (s) => document.querySelector(s).getBoundingClientRect();
+        return [r("#bpmNum").bottom, r(".sliderrow"), r("#lamps"), r(".btnrow").top];
+      });
+      expect(numBottom).toBeLessThanOrEqual(slider.top);
+      expect(slider.bottom).toBeLessThanOrEqual(lamps.top);
+      expect(lamps.bottom).toBeLessThanOrEqual(chipsTop);
     });
 
     test("sheets scroll instead of spilling off-screen", async ({ page }) => {
@@ -89,9 +92,8 @@ test("a one-song set says 1 song", async ({ page }) => {
   await expect(page.locator("#setPillText")).toHaveText("Solo · 1 song");
 });
 
-test("the tempo bar and both volume bars are labelled", async ({ page }) => {
+test("both volume bars are labelled", async ({ page }) => {
   await open(page);
-  await expect(page.locator(".tempolbl")).toHaveText("TEMPO");
   await expect(page.locator("#volRow .eyebrow")).toHaveText("CLICK");
   await expect(page.locator("#voiceRow .eyebrow")).toHaveText("VOICE");
 });

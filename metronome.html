@@ -147,9 +147,8 @@ button{border:0; background:none; padding:0; cursor:pointer;}
 
 /* ---------- controls ---------- */
 .controls{flex:0 0 auto; display:flex; flex-direction:column; gap:12px; margin-top:8px;}
-.sliderrow{display:flex; flex-wrap:wrap; align-items:center; gap:0 12px;}
-/* says what the long bar is: on its own line, tucked down between − and + just over the track */
-.eyebrow.tempolbl{flex:0 0 100%; order:-1; text-align:center; font-size:11px; line-height:1; margin-bottom:-8px;}
+.sliderrow{display:flex; align-items:center; gap:12px;}
+.display .sliderrow{align-self:stretch; margin-top:14px;}   /* right under the BPM it sets */
 .step{
   width:56px; height:56px; border-radius:50%; background:var(--panel);
   border:1px solid var(--line); font-size:26px; font-weight:700; color:var(--text);
@@ -394,7 +393,6 @@ textarea{min-height:110px; resize:vertical;}
   .vols{grid-area:vol; margin-top:4px;}
   .display{grid-area:display; min-height:0;}
   .controls{grid-area:controls; gap:10px;}
-  .eyebrow.tempolbl{flex-basis:auto; order:0; margin:0;}   /* no height to spare: beside the bar instead */
   .bpm-num{font-size:clamp(56px, 26vh, 260px);}
   .lamps{margin-top:max(8px, 1.6vh);}
   .transport{height:max(60px, 10vh); font-size:20px;}
@@ -476,17 +474,16 @@ textarea{min-height:110px; resize:vertical;}
 <div class="display">
   <div class="bpm-num" id="bpmNum">120</div>
   <div class="bpm-label">BPM</div>
+  <div class="sliderrow">
+    <button class="step" id="minus" aria-label="Slower">&#8722;</button>
+    <input type="range" id="slider" min="30" max="280" value="120" step="1" aria-label="Tempo">
+    <button class="step" id="plus" aria-label="Faster">+</button>
+  </div>
   <div class="lamps" id="lamps"></div>
   <div class="lamps-hint">Tap a beat to accent or mute it · red = beat 1</div>
 </div>
 
 <div class="controls">
-  <div class="sliderrow">
-    <button class="step" id="minus" aria-label="Slower">&#8722;</button>
-    <span class="eyebrow tempolbl">TEMPO</span>
-    <input type="range" id="slider" min="30" max="280" value="120" step="1" aria-label="Tempo">
-    <button class="step" id="plus" aria-label="Faster">+</button>
-  </div>
   <div class="btnrow">
     <button class="chip tap" id="tapBtn">TAP</button>
     <select class="chip" id="sigSel" aria-label="Time signature"></select>
