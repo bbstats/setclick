@@ -858,33 +858,28 @@ function scheduler() {
   if (nextT < ctx.currentTime - 0.05) {      // resumed after an audio interruption:
     nextT = ctx.currentTime + 0.06;          // re-anchor instead of bursting to catch up
   }
+  // The count-in plays the song's own click (accents, mutes, subdivisions) with the count
+  // spoken over it, so the band hears the feel it's about to play even where the count skips beats.
   while (nextT < ctx.currentTime + AHEAD) {
-    if (phase === "count") {
-      const barIx = Math.floor(countPos / state.beats);
-      const bInBar = countPos % state.beats;
-      const sparse = state.countIn === 2 && barIx === 0;   // "1... 2... 1 2 3 4"
-      const step = (state.dotted && isCompound()) || sparse ? countStep() : 1;   // dotted: count the pulses
-      if (bInBar % step === 0) {
-        const n = bInBar / step + 1;
-        clickAt(nextT, bInBar === 0 ? 2 : 1);
-        speakAt(nextT, n, bInBar === 0, beatDur() * step);
-        queueLamp({ t: nextT, b: bInBar, count: n });
-      }
-      nextT += beatDur();
-      countPos++;
-      if (countPos >= countTotal) { phase = "run"; beat = 0; sub = 0; }
-      continue;
-    }
     if (sub === 0) {
       const acc = state.accents[beat] ?? 1;
       if (acc > 0) clickAt(nextT, acc);
-      queueLamp({ t: nextT, b: beat });
+      if (phase === "count") {
+        const sparse = state.countIn === 2 && countPos < state.beats;   // "1... 2... 1 2 3 4"
+        const step = (state.dotted && isCompound()) || sparse ? countStep() : 1;   // dotted: count the pulses
+        const n = Math.floor(beat / step) + 1;                            // shown until the next count
+        if (beat % step === 0) speakAt(nextT, n, beat === 0, beatDur() * step);
+        queueLamp({ t: nextT, b: beat, count: n });
+      } else queueLamp({ t: nextT, b: beat });
     } else if (state.subdiv > 1) {
       clickAt(nextT, 0);
     }
     nextT += beatDur() / state.subdiv;
     sub++;
-    if (sub >= state.subdiv) { sub = 0; beat = (beat + 1) % state.beats; }
+    if (sub >= state.subdiv) {
+      sub = 0; beat = (beat + 1) % state.beats;
+      if (phase === "count" && ++countPos >= countTotal) { phase = "run"; beat = 0; }   // the song starts on 1
+    }
   }
 }
 
